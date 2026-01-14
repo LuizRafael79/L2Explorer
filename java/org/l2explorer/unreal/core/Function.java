@@ -33,6 +33,8 @@ import org.l2explorer.io.annotation.ReadMethod;
 import org.l2explorer.io.annotation.UByte;
 import org.l2explorer.io.annotation.UShort;
 import org.l2explorer.io.annotation.WriteMethod;
+import org.l2explorer.unreal.annotation.Bytecode;
+import org.l2explorer.unreal.bytecode.token.Token;
 
 /**
  * Represents a Function definition in the Unreal Engine (inherits from Struct).
@@ -52,6 +54,17 @@ public class Function extends Struct {
     @UShort
     private int replicationOffset;
 
+    @Bytecode
+    private Token[] bytecode;
+    
+    public Token[] getBytecode() {
+        return bytecode;
+    }
+    
+    public void setBytecode(Token[] bytecode) {
+        this.bytecode = bytecode;
+    } 
+   
     public Function() {
     }
 

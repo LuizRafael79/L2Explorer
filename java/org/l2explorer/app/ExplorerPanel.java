@@ -59,7 +59,8 @@ public class ExplorerPanel extends JPanel {
         add(createStatusBar(), BorderLayout.SOUTH);
     }
 
-    private JPanel createTreePanel() {
+    @SuppressWarnings("unused")
+	private JPanel createTreePanel() {
         JPanel treePanel = new JPanel(new BorderLayout()); 
         treePanel.setBackground(new Color(45, 45, 45));
 
@@ -221,18 +222,46 @@ public class ExplorerPanel extends JPanel {
         infoArea.setText(sb.toString());
 
         codeArea.setText("// Decompiling " + entry.getObjectName().getName() + "...\n");
-        
-        // O decompiler agora trabalha com o log ativo para rastrear o bytecode
-        String source = decompiler.decompile(entry);
-        codeArea.setText(source);
-        codeArea.setCaretPosition(0);
+
+        try {
+            String source;
+            
+            // Se for uma Class completa
+            if (entry.getFullClassName().equals("Core.Class")) {
+                debugConsole.log("Decompiling full class with all members...");
+                source = decompiler.decompileClassComplete(entry);
+            }
+            // Se for uma Function individual
+            else if (entry.getFullClassName().equals("Core.Function")) {
+                debugConsole.log("Decompiling function bytecode...");
+                source = decompiler.decompile(entry);
+            }
+            // Outros tipos (Struct, Property, etc)
+            else {
+                debugConsole.log("Type not fully supported: " + entry.getFullClassName());
+                source = "// Type: " + entry.getFullClassName() + "\n";
+                source += "// Name: " + entry.getObjectName().getName() + "\n";
+                source += "// Decompilation not yet implemented for this type\n";
+            }
+            
+            codeArea.setText(source);
+            codeArea.setCaretPosition(0);
+            debugConsole.log("Decompilation completed!");
+            
+        } catch (Exception e) {
+            codeArea.setText("// ERROR during decompilation:\n// " + e.getMessage());
+            debugConsole.log("ERROR: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
 
     /**
      * Componente interno para logs de debug.
      */
     public class DebugConsole extends JTextArea {
-        public DebugConsole() {
+        private static final long serialVersionUID = 1L;
+
+		public DebugConsole() {
             setEditable(false);
             setBackground(new Color(15, 15, 15));
             setForeground(new Color(100, 255, 100));

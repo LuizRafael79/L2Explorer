@@ -23,26 +23,13 @@ public class UnrealObjectInput<C extends Context> implements ObjectInput<C> {
     public C getContext() {
         return context;
     }
-
-    @Override
+       
     public <T> T readObject(Class<T> clazz) throws IOException {
-        try {
-            // 1. Criamos a instância da classe desejada (ex: Token)
-            T instance = clazz.getDeclaredConstructor().newInstance();
-            
-            // 2. Buscamos o serializer
-            Serializer<T, C> serializer = (Serializer<T, C>) serializerFactory.forClass(clazz);
-            
-            // 3. O serializer preenche a instância (void)
-            serializer.readObject(instance, this);
-            
-            // 4. Retornamos a instância agora populada
-            return instance;
-        } catch (Exception e) {
-            throw new IOException("Erro ao instanciar " + clazz.getName(), e);
-        }
+        Serializer<T, C> serializer = (Serializer<T, C>) serializerFactory.forClass(clazz);
+        T instance = serializer.instantiate(this); // Lê o opcode e cria a classe certa
+        serializer.readObject(instance, this);     // Popula os dados
+        return instance;
     }
-        
     public L2DataInput getDataInput() {
         return dataInput;
     }
