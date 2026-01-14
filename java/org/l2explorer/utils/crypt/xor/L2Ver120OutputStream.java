@@ -1,0 +1,89 @@
+/*
+ * Copyright (c) 2021 acmi
+ * Copyright (c) 2026 Galagard/L2Explorer
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+package org.l2explorer.utils.crypt.xor;
+
+import java.io.FilterOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.util.Objects;
+
+import static org.l2explorer.utils.crypt.xor.L2Ver120.START_IND;
+import static org.l2explorer.utils.crypt.xor.L2Ver120.getXORKey;
+
+/**
+ * OutputStream implementation for XOR encryption version 120.
+ * <p>Applies a rolling XOR key generated from an incremental index 
+ * starting at {@link L2Ver120#START_IND}.</p>
+ *
+ * @author acmi (Original Code)
+ * @author Galagard (L2Explorer Modernization)
+ * @since 13-01-2026
+ */
+public final class L2Ver120OutputStream extends FilterOutputStream {
+    private int ind = START_IND;
+
+    /**
+     * Constructs a new L2Ver120OutputStream.
+     *
+     * @param output the underlying output stream to write encrypted data to.
+     * @throws NullPointerException if the output stream is null.
+     */
+    public L2Ver120OutputStream(OutputStream output) {
+        super(Objects.requireNonNull(output, "Output stream cannot be null"));
+    }
+
+    @Override
+    public void write(int b) throws IOException {
+        // Apply XOR with the rolling key and write to the underlying stream
+        out.write(b ^ getXORKey(ind++));
+    }
+
+    @Override
+    public void write(byte[] b, int off, int len) throws IOException {
+        if (b == null) {
+            throw new NullPointerException();
+        } else if ((off < 0) || (off > b.length) || (len < 0) ||
+                   ((off + len) > b.length) || ((off + len) < 0)) {
+            throw new IndexOutOfBoundsException();
+        } else if (len == 0) {
+            return;
+        }
+        
+        // Optimize block writes by applying XOR to the buffer
+        byte[] encrypted = new byte[len];
+        for (int i = 0; i < len; i++) {
+            encrypted[i] = (byte) (b[off + i] ^ getXORKey(ind++));
+        }
+        out.write(encrypted, 0, len);
+    }
+
+    @Override
+    public void flush() throws IOException {
+        out.flush();
+    }
+
+    @Override
+    public void close() throws IOException {
+        out.close();
+    }
+}
