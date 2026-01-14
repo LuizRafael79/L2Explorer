@@ -9,6 +9,7 @@ import javax.swing.event.TreeExpansionEvent;
 import javax.swing.event.TreeWillExpandListener;
 import javax.swing.tree.*;
 import java.awt.*;
+import java.io.File;
 import java.io.IOException;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -30,11 +31,15 @@ public class ExplorerPanel extends JPanel {
     private UnrealPackage currentPackage;
     private UnrealDecompiler decompiler;
 
-    public ExplorerPanel(UnrealPackage up) {
+ // Adicione este campo
+    private File systemDir;
+
+    public ExplorerPanel(UnrealPackage up, File baseDir) {
         this.currentPackage = up;
+        this.systemDir = baseDir; // <--- Guarda o caminho aqui
         this.debugConsole = new DebugConsole();
         
-        // O decompiler agora recebe o console para logar erros de bytecode
+        // O decompiler agora é instanciado aqui
         this.decompiler = new UnrealDecompiler();
         
         setLayout(new BorderLayout());
@@ -208,6 +213,7 @@ public class ExplorerPanel extends JPanel {
 
     private void handleSelection() throws IOException {
         DefaultMutableTreeNode node = (DefaultMutableTreeNode) objectTree.getLastSelectedPathComponent();
+        
         if (node == null || !(node.getUserObject() instanceof ExportEntry entry)) return;
 
         debugConsole.clear();
@@ -256,6 +262,20 @@ public class ExplorerPanel extends JPanel {
     }
 
     /**
+	 * @return the systemDir
+	 */
+	public File getSystemDir() {
+		return systemDir;
+	}
+
+	/**
+	 * @param systemDir the systemDir to set
+	 */
+	public void setSystemDir(File systemDir) {
+		this.systemDir = systemDir;
+	}
+
+	/**
      * Componente interno para logs de debug.
      */
     public class DebugConsole extends JTextArea {

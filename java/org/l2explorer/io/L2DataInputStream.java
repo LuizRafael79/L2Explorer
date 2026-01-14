@@ -194,14 +194,4 @@ public class L2DataInputStream extends FilterInputStream implements L2DataInput 
             return new String(data, 0, len - 1, charset);
         }
     }
-
-    @Override
-    public String readLine() throws IOException {
-        throw new UnsupportedOperationException("Use readString() para arquivos de L2");
-    }
-
-    @Override
-    public String readUTF() throws IOException {
-        throw new UnsupportedOperationException("Use readString() para arquivos de L2");
-    }
 }

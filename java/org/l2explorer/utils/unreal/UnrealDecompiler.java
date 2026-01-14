@@ -45,6 +45,14 @@ public class UnrealDecompiler {
 	/**
 	 * Decompila UMA função individual (Core.Function)
 	 */
+	
+	@SuppressWarnings("unused")
+	private File baseDir;
+
+	public void setBaseDir(File dir) {
+	    this.baseDir = dir;
+	}
+	
 	public String decompile(UnrealPackage.ExportEntry entry) throws IOException {
 	    if (!entry.getFullClassName().equals("Core.Function")) {
 	        return "// Not a function";
@@ -52,12 +60,17 @@ public class UnrealDecompiler {
 
 	    try {
 	        // Cria um Environment simples apenas com o package atual
-	        File packageFile = new File(entry.getUnrealPackage().getPackageName());
+	        @SuppressWarnings("unused")
+			File packageFile = new File(entry.getUnrealPackage().getPackageName());
 //	        Environment env = new Environment(packageFile.getParentFile(), Collections.emptyList());
 	        
 	        SimpleEnv env = new SimpleEnv(entry.getUnrealPackage());
 	        
 	        UnrealSerializerFactory factory = new UnrealSerializerFactory(env);
+	        
+	        if (this.baseDir != null) {
+	            factory.setBaseDir(this.baseDir); 
+	        }
 	        
 	        org.l2explorer.unreal.core.Function func = 
 	            (org.l2explorer.unreal.core.Function) factory.getOrCreateObject(entry);

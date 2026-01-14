@@ -124,8 +124,8 @@ public class Polys extends Object {
             }
 
             this.flags = input.readInt();
-            this.actor = factory.getOrCreateObject(input.getContext().getUnrealPackage().objectReference(input.readCompactInt()));
-            this.texture = factory.getOrCreateObject(input.getContext().getUnrealPackage().objectReference(input.readCompactInt()));
+            this.actor = (Object) factory.getOrCreateObject(input.getContext().getUnrealPackage().objectReference(input.readCompactInt()));
+            this.texture = (Object) factory.getOrCreateObject(input.getContext().getUnrealPackage().objectReference(input.readCompactInt()));
             this.itemName = (String) input.getContext().getUnrealPackage().nameReference(input.readCompactInt());
             this.iLink = input.readCompactInt();
             this.iBrushPoly = input.readCompactInt();

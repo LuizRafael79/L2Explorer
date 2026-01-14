@@ -69,8 +69,13 @@ import org.l2explorer.unreal.util.InvalidationListener;
 import org.l2explorer.unreal.util.ObservableSet;
 import org.l2explorer.unreal.util.ObservableSetWrapper;
 
-@SuppressWarnings("unchecked")
 public class UnrealSerializerFactory extends ReflectionSerializerFactory<UnrealRuntimeContext> {
+	private java.io.File baseDir;
+
+    // Adicione este método para o UnrealDecompiler conseguir "conversar" com a factory
+    public void setBaseDir(java.io.File dir) {
+        this.baseDir = dir;
+    }
     private static final Logger log = Logger.getLogger(UnrealSerializerFactory.class.getName());
 
     private static final String LOAD_THREAD_NAME = "Unreal loader";
@@ -131,46 +136,80 @@ public class UnrealSerializerFactory extends ReflectionSerializerFactory<UnrealR
         return super.createInstantiator(clazz);
     }
 
-    @SuppressWarnings("deprecation")
-	public Object getOrCreateObject(@SuppressWarnings("rawtypes") UnrealPackage.Entry packageLocalEntry) throws IOException {
+    @SuppressWarnings({ "deprecation", "unchecked" })
+    public java.lang.Object getOrCreateObject(@SuppressWarnings("rawtypes") UnrealPackage.Entry packageLocalEntry) throws IOException {
         if (packageLocalEntry == null) {
             return null;
         }
 
         String key = keyFor(packageLocalEntry);
         if (!objects.containsKey(key)) {
-            log.finest(() -> String.format("Loading %s", packageLocalEntry));
+            // 1. ARQUITETO: Tenta carregar o pacote do disco usando o diretório base
+            checkAndLoadPackageFromDisk(packageLocalEntry.getUnrealPackage().getPackageName());
 
             UnrealPackage.ExportEntry entry;
             try {
                 entry = resolveExportEntry(packageLocalEntry).orElse(null);
                 if (entry != null) {
-                    Class<? extends Object> clazz = getClass(entry.getFullClassName());
-                    Object obj = clazz.newInstance();
+                    Class<? extends org.l2explorer.unreal.core.Object> clazz = getClass(entry.getFullClassName());
+                    org.l2explorer.unreal.core.Object obj = clazz.newInstance();
                     objects.put(key, obj);
-                    Runnable load = () -> {
-						try {
-							load(obj, entry);
-						} catch (IOException e) {
-							// TODO Auto-generated catch block
-							e.printStackTrace();
-						}
-					};
+                    
                     if (LOAD_THREAD_NAME.equals(Thread.currentThread().getName())) {
-                        load.run();
+                        load(obj, entry);
                     } else {
-                        executorService.submit(load).get();
+                        executorService.submit(() -> {
+                            try {
+                                load(obj, entry);
+                            } catch (IOException e) {
+                                e.printStackTrace();
+                            }
+                        }).get();
                     }
                 } else {
+                    // 2. ARQUITETO: Corrigido o erro de void. Chamamos o create e retornamos o que ele criou.
                     create(packageLocalEntry.getObjectFullName(), packageLocalEntry.getFullClassName());
                 }
             } catch (Throwable e) {
-                throw new IllegalStateException(e);
+                throw new IllegalStateException("Erro ao carregar: " + packageLocalEntry.getObjectFullName(), e);
             }
         }
         return objects.get(key);
     }
 
+    /**
+     * ARQUITETO: Ajustado para usar o campo 'environment' e o construtor de memória.
+     */
+    private void checkAndLoadPackageFromDisk(String pkgName) {
+        // No seu código o campo chama-se 'environment'
+        try {
+            if (environment.listPackages(pkgName).anyMatch(p -> p.getPackageName().equalsIgnoreCase(pkgName))) {
+                return;
+            }
+        } catch (IOException ignored) {}
+
+        if (baseDir != null && baseDir.isDirectory()) {
+            java.io.File file = new java.io.File(baseDir, pkgName + ".u");
+            if (file.exists()) {
+                try {
+                    System.out.println("[DEBUG] Carregando do disco: " + file.getName());
+                    byte[] data = java.nio.file.Files.readAllBytes(file.toPath());
+                    
+                    // Usando RandomAccessMemory conforme seu import na linha 46
+                    org.l2explorer.io.RandomAccessMemory ra = new org.l2explorer.io.RandomAccessMemory(pkgName, data, UnrealPackage.getDefaultCharset());
+                    UnrealPackage upkg = new UnrealPackage(ra);
+                    
+                    // Adiciona ao environment (que é o seu EnvironmentWrapper)
+                    // Como o EnvironmentWrapper não tem addPackage público, vamos apenas garantir que o motor o veja via stream
+                    if (environment instanceof EnvironmentWrapper ew) {
+                         ew.adds.put(pkgName.substring(0, 1).toUpperCase() + pkgName.substring(1).toLowerCase(), upkg);
+                    }
+                } catch (Exception e) {
+                    System.err.println("Falha ao carregar dependência " + pkgName + ": " + e.getMessage());
+                }
+            }
+        }
+    }
     private String keyFor(@SuppressWarnings("rawtypes") UnrealPackage.Entry entry) {
         return (entry.getObjectFullName() + "_" + entry.getFullClassName()).toLowerCase();
     }
@@ -218,7 +257,7 @@ public class UnrealSerializerFactory extends ReflectionSerializerFactory<UnrealR
      * @throws UnrealException if not found
      */
     public Object getOrCreateObject(String objName, Predicate<String> objClass) throws IOException, UnrealException {
-        return getOrCreateObject(getExportEntry(objName, objClass)
+        return (Object) getOrCreateObject(getExportEntry(objName, objClass)
                 .orElseThrow(() -> new UnrealException("Entry " + objName + " not found")));
     }
 
