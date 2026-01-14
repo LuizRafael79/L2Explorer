@@ -40,6 +40,7 @@ import org.l2explorer.io.ObjectOutput;
 import org.l2explorer.io.ReflectionSerializerFactory;
 import org.l2explorer.io.SerializerException;
 import org.l2explorer.unreal.UnrealException;
+import org.l2explorer.unreal.bytecode.token.ConversionTable;
 import org.l2explorer.unreal.bytecode.token.EndFunctionParams;
 import org.l2explorer.unreal.bytecode.token.NativeFunctionCall;
 import org.l2explorer.unreal.bytecode.token.Token;
@@ -60,14 +61,15 @@ public class TokenSerializerFactory extends ReflectionSerializerFactory<Bytecode
     protected Function<ObjectInput<BytecodeContext>, Object> createInstantiator(Class<?> clazz) {
         if (Token.class.isAssignableFrom(clazz)) {
             return arg0 -> {
-				try {
-					return instantiate(arg0);
-				} catch (UncheckedIOException | IOException e) {
-					// TODO Auto-generated catch block
-					e.printStackTrace();
-				}
-				return arg0;
-			};
+                try {
+                    // Chama o seu método instantiate(arg0)
+                    return instantiate(arg0);
+                } catch (IOException e) {
+                    // IMPORTANTE: Lançar a exceção impede que o Java tente 
+                    // fazer o cast de UnrealObjectInput para Token
+                    throw new SerializerException(e);
+                }
+            };
         }
         return super.createInstantiator(clazz);
     }
@@ -168,76 +170,65 @@ public class TokenSerializerFactory extends ReflectionSerializerFactory<Bytecode
         return context.getUnrealPackage().nameReference("None");
     }
 
-    private static void register(Class<? extends Token> clazz, int opcode, boolean conversion) {
-        if (clazz == null) {
-            System.err.println("AVISO: Classe nula para opcode 0x" + Integer.toHexString(opcode));
-            return;
+    private static void register(Class<? extends Token> clazz) {
+        if (clazz == null) return;
+
+        try {
+            // Pega o campo OPCODE da classe (Ex: public static final int OPCODE = 0x3E)
+            java.lang.reflect.Field field = clazz.getDeclaredField("OPCODE");
+            field.setAccessible(true);
+            int opcode = field.getInt(null);
+
+            // Decide a tabela pela anotação
+            boolean isConv = clazz.isAnnotationPresent(ConversionToken.class);
+            Map<Integer, Class<? extends Token>> table = isConv ? conversionTokenTable : mainTokenTable;
+
+            table.put(opcode, clazz);
+        } catch (Exception e) {
+            // Ignora classes que não possuem o campo OPCODE
         }
-        Map<Integer, Class<? extends Token>> table = conversion ? conversionTokenTable : mainTokenTable;
-        table.put(opcode, clazz);
     }
 
     static {
-        try {
-            // Registra Main
-            for (UnrealOpcode.Main op : UnrealOpcode.Main.values()) {
-                if (op == UnrealOpcode.Main.CONVERSION_TABLE) continue;
-                register(op.getBytecode(), op.getOpcode(), false);
-            }
-
-            // Registra Conversion
-            for (UnrealOpcode.Conversion op : UnrealOpcode.Conversion.values()) {
-                register(op.getBytecode(), op.getOpcode(), true);
-            }
-
-            Class<? extends Token> ctClass = UnrealOpcode.Main.CONVERSION_TABLE.getBytecode();
-            int ctOpcode = UnrealOpcode.Main.CONVERSION_TABLE.getOpcode();
-            register(ctClass, ctOpcode, false);
-            register(ctClass, ctOpcode, true);
-            
-            System.out.println("DEBUG: Tokens registrados! Main: " + mainTokenTable.size() + " | Conversion: " + conversionTokenTable.size());
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        // Registra os tokens percorrendo os seus Enums
+        for (UnrealOpcode.Main op : UnrealOpcode.Main.values()) register(op.getBytecode());
+        for (UnrealOpcode.Conversion op : UnrealOpcode.Conversion.values()) register(op.getBytecode());
+        
+        // Registro explícito do wrapper 0x39
+        register(ConversionTable.class);
     }
     
-    @SuppressWarnings("deprecation")
     private Token instantiate(ObjectInput<BytecodeContext> input) throws IOException {
         int opcode = input.readUnsignedByte();
         
-        // 1. TRATAMENTO PRÉ-BUSCA: Se for o sinalizador 0x39, mude para conversão AGORA
-        if (opcode == 0x39 && !input.getContext().isConversion()) {
-            input.getContext().changeConversion();
-        }
-
-        // 2. Determina o modo atual (pode ter mudado acima)
+        // Pega o estado do contexto ANTES de decidir a tabela
         boolean isConversionMode = input.getContext().isConversion();
 
-        // 3. Nativos (Apenas se não for conversão e não for o 0x39)
+        // Nativos (Apenas na Main)
         if (!isConversionMode && opcode >= EX_ExtendedNative) {
             return readNativeCall(input, opcode);
         }
 
-        // 4. Busca a classe no mapa correto
+        // Busca a classe no mapa baseado no modo ATUAL
         Class<? extends Token> tokenClass = isConversionMode ? 
             conversionTokenTable.get(opcode) : mainTokenTable.get(opcode);
 
         if (tokenClass == null) {
-            String tableName = isConversionMode ? "Conversion" : "Main";
-            throw new IOException(String.format("Unknown token: %02x, table: %s", opcode, tableName));
+            String table = isConversionMode ? "Conversion" : "Main";
+            throw new IOException(String.format("Unknown token: %02x, table: %s", opcode, table));
         }
 
-        // 5. Instanciação
         Token token;
         try {
-            token = tokenClass.newInstance();
-        } catch (ReflectiveOperationException e) {
+            token = tokenClass.getDeclaredConstructor().newInstance();
+        } catch (Exception e) {
             throw new SerializerException(e);
         }
 
-        // 6. TRATAMENTO PÓS-INSTÂNCIA: Se o token lido for de conversão (e não o 0x39), volte para Main
-        // Isso garante que o próximo token lido após o VectorToRotator seja da Main
-        if (isConversionMode && opcode != 0x39 && token.getClass().isAnnotationPresent(ConversionToken.class)) {
+        // LÓGICA DE TRANSIÇÃO (Igual ao original)
+        if (opcode == 0x39) {
+            input.getContext().changeConversion();
+        } else if (isConversionMode && token.getClass().isAnnotationPresent(ConversionToken.class)) {
             input.getContext().changeConversion();
         }
 

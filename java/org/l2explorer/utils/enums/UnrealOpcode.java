@@ -74,7 +74,7 @@ public class UnrealOpcode {
             this.opcode = opcode;
             this.bytecode = mainclass;
             this.name = name;
-        }
+            }
 
         public int getOpcode() { return opcode; }
         public Class<? extends Token> getBytecode() { return bytecode; }
