@@ -240,7 +240,7 @@ public class ExplorerPanel extends JPanel {
             // Se for uma Function individual
             else if (entry.getFullClassName().equals("Core.Function")) {
                 debugConsole.log("Decompiling function bytecode...");
-                source = decompiler.decompile(entry);
+                source = decompiler.decompileFunctionACMI(entry);
             }
             // Outros tipos (Struct, Property, etc)
             else {

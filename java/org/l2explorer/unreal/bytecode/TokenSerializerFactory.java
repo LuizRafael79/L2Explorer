@@ -21,12 +21,6 @@
  */
 package org.l2explorer.unreal.bytecode;
 
-import org.l2explorer.unreal.UnrealException;
-import org.l2explorer.unreal.bytecode.token.*;
-import org.l2explorer.unreal.bytecode.token.Context;
-import org.l2explorer.unreal.bytecode.token.annotation.ConversionToken;
-import org.l2explorer.unreal.bytecode.token.annotation.FunctionParams;
-
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -40,7 +34,18 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.logging.Logger;
 
-import org.l2explorer.io.*;
+import org.l2explorer.io.L2DataInput;
+import org.l2explorer.io.ObjectInput;
+import org.l2explorer.io.ObjectOutput;
+import org.l2explorer.io.ReflectionSerializerFactory;
+import org.l2explorer.io.SerializerException;
+import org.l2explorer.unreal.UnrealException;
+import org.l2explorer.unreal.bytecode.token.EndFunctionParams;
+import org.l2explorer.unreal.bytecode.token.NativeFunctionCall;
+import org.l2explorer.unreal.bytecode.token.Token;
+import org.l2explorer.unreal.bytecode.token.annotation.ConversionToken;
+import org.l2explorer.unreal.bytecode.token.annotation.FunctionParams;
+import org.l2explorer.utils.enums.UnrealOpcode;
 
 public class TokenSerializerFactory extends ReflectionSerializerFactory<BytecodeContext> {
     private static final Logger log = Logger.getLogger(TokenSerializerFactory.class.getName());
@@ -65,42 +70,6 @@ public class TokenSerializerFactory extends ReflectionSerializerFactory<Bytecode
 			};
         }
         return super.createInstantiator(clazz);
-    }
-
-    @SuppressWarnings("deprecation")
-	private Token instantiate(ObjectInput<BytecodeContext> input) throws UncheckedIOException, IOException {
-        int opcode = input.readUnsignedByte();
-        Map<Integer, Class<? extends Token>> table;
-        String tableName;
-        if (input.getContext().isConversion()) {
-            table = conversionTokenTable;
-            tableName = "Conversion";
-
-            input.getContext().changeConversion();
-        } else {
-            if (opcode >= EX_ExtendedNative) {
-                return readNativeCall(input, opcode);
-            }
-
-            table = mainTokenTable;
-            tableName = "Main";
-
-            if (opcode == ConversionTable.OPCODE) {
-                input.getContext().changeConversion();
-            }
-        }
-
-        Class<? extends Token> tokenClass = table.get(opcode);
-
-        if (tokenClass == null) {
-            throw new UncheckedIOException(new IOException(String.format("Unknown token: %02x, table: %s", opcode, tableName)));
-        }
-
-        try {
-            return tokenClass.newInstance();
-        } catch (ReflectiveOperationException e) {
-            throw new SerializerException(e);
-        }
     }
 
     private Token readNativeCall(ObjectInput<BytecodeContext> input, int b) throws UncheckedIOException, IOException {
@@ -199,139 +168,86 @@ public class TokenSerializerFactory extends ReflectionSerializerFactory<Bytecode
         return context.getUnrealPackage().nameReference("None");
     }
 
+    private static void register(Class<? extends Token> clazz, int opcode, boolean conversion) {
+        if (clazz == null) {
+            System.err.println("AVISO: Classe nula para opcode 0x" + Integer.toHexString(opcode));
+            return;
+        }
+        Map<Integer, Class<? extends Token>> table = conversion ? conversionTokenTable : mainTokenTable;
+        table.put(opcode, clazz);
+    }
+
     static {
-        //Main
-        register(LocalVariable.class);     //00
-        register(InstanceVariable.class);  //01
-        register(DefaultVariable.class);   //02
-
-        register(Return.class);            //04
-        register(Switch.class);            //05
-        register(Jump.class);              //06
-        register(JumpIfNot.class);         //07
-        register(Stop.class);              //08
-        register(Assert.class);            //09
-        register(Case.class);              //0a
-        register(Nothing.class);           //0b
-        register(LabelTable.class);        //0c
-        register(GotoLabel.class);         //0d
-        register(EatString.class);         //0e
-        register(Let.class);               //0f
-        register(DynArrayElement.class);   //10
-        register(New.class);               //11
-        register(ClassContext.class);      //12
-        register(Metacast.class);          //13
-        register(LetBool.class);           //14
-
-        register(EndFunctionParams.class); //16
-        register(Self.class);              //17
-        register(Skip.class);              //18
-        register(Context.class);           //19
-        register(ArrayElement.class);      //1a
-        register(VirtualFunction.class);   //1b
-        register(FinalFunction.class);     //1c
-        register(IntConst.class);          //1d
-        register(FloatConst.class);        //1e
-        register(StringConst.class);       //1f
-        register(ObjectConst.class);       //20
-        register(NameConst.class);         //21
-        register(RotatorConst.class);      //22
-        register(VectorConst.class);       //23
-        register(ByteConst.class);         //24
-        register(IntZero.class);           //25
-        register(IntOne.class);            //26
-        register(True.class);              //27
-        register(False.class);             //28
-        register(NativeParam.class);       //29
-        register(NoObject.class);          //2a
-
-        register(IntConstByte.class);      //2c
-        register(BoolVariable.class);      //2d
-        register(DynamicCast.class);       //2e
-        register(Iterator.class);          //2f
-        register(IteratorPop.class);       //30
-        register(IteratorNext.class);      //31
-        register(StructCmpEq.class);       //32
-        register(StructCmpNe.class);       //33
-
-        register(StructMember.class);      //36
-        register(Length.class);            //37
-        register(GlobalFunction.class);    //38
-        register(ConversionTable.class, true);   //39
-        register(ConversionTable.class, false);
-        register(Insert.class);            //40
-        register(Remove.class);            //41
-
-        register(DelegateName.class);      //44
-
-        register(INT64Const.class);        //46
-        register(DynArraySort.class);      //47
-
-        //Conversion
-        register(ByteToInt.class);         //3a
-        register(ByteToBool.class);        //3b
-        register(ByteToFloat.class);       //3c
-        register(IntToByte.class);         //3d
-        register(IntToBool.class);         //3e
-        register(IntToFloat.class);        //3f
-        register(BoolToByte.class);        //40
-        register(BoolToInt.class);         //41
-        register(BoolToFloat.class);       //42
-        register(FloatToByte.class);       //43
-        register(FloatToInt.class);        //44
-        register(FloatToBool.class);       //45
-        register(StringToName.class);      //46
-        register(ObjectToBool.class);      //47
-        register(NameToBool.class);        //48
-        register(StringToByte.class);      //49
-        register(StringToInt.class);       //4a
-        register(StringToBool.class);      //4b
-        register(StringToFloat.class);     //4c
-        register(StringToVector.class);    //4d
-        register(StringToRotator.class);   //4e
-        register(VectorToBool.class);      //4f
-        register(VectorToRotator.class);   //50
-        register(RotatorToBool.class);     //51
-        register(ByteToString.class);      //52
-        register(IntToString.class);       //53
-        register(BoolToString.class);      //54
-        register(FloatToString.class);     //55
-        register(ObjectToString.class);    //56
-        register(NameToString.class);      //57
-        register(VectorToString.class);    //58
-        register(RotatorToString.class);   //59
-        register(ByteToINT64.class);       //5a
-        register(IntToINT64.class);        //5b
-        register(BoolToINT64.class);       //5c
-        register(FloatToINT64.class);      //5d
-        register(StringToINT64.class);     //5e
-        register(INT64ToByte.class);       //5f
-        register(INT64ToInt.class);        //60
-        register(INT64ToBool.class);       //61
-        register(INT64ToFloat.class);      //62
-        register(INT64ToString.class);     //63
-    }
-
-    private static void register(Class<? extends Token> clazz, boolean conversion) {
-        Map<Integer, Class<? extends Token>> table;
-
-        if (conversion) {
-            table = conversionTokenTable;
-        } else {
-            table = mainTokenTable;
-        }
-
         try {
-            Class<? extends Token> old = table.put(clazz.getDeclaredField("OPCODE").getInt(null), clazz);
-            if (old != null) {
-                log.info(old + " replaced with " + clazz);
+            // Registra Main
+            for (UnrealOpcode.Main op : UnrealOpcode.Main.values()) {
+                if (op == UnrealOpcode.Main.CONVERSION_TABLE) continue;
+                register(op.getBytecode(), op.getOpcode(), false);
             }
-        } catch (ReflectiveOperationException e) {
-            throw new RuntimeException(String.format("Couldn't register %s opcode", clazz), e);
+
+            // Registra Conversion
+            for (UnrealOpcode.Conversion op : UnrealOpcode.Conversion.values()) {
+                register(op.getBytecode(), op.getOpcode(), true);
+            }
+
+            Class<? extends Token> ctClass = UnrealOpcode.Main.CONVERSION_TABLE.getBytecode();
+            int ctOpcode = UnrealOpcode.Main.CONVERSION_TABLE.getOpcode();
+            register(ctClass, ctOpcode, false);
+            register(ctClass, ctOpcode, true);
+            
+            System.out.println("DEBUG: Tokens registrados! Main: " + mainTokenTable.size() + " | Conversion: " + conversionTokenTable.size());
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
+    
+    @SuppressWarnings("deprecation")
+    private Token instantiate(ObjectInput<BytecodeContext> input) throws IOException {
+        int opcode = input.readUnsignedByte();
+        
+        // 1. TRATAMENTO PRÉ-BUSCA: Se for o sinalizador 0x39, mude para conversão AGORA
+        if (opcode == 0x39 && !input.getContext().isConversion()) {
+            input.getContext().changeConversion();
+        }
 
-    public static void register(Class<? extends Token> clazz) {
-        register(clazz, clazz.isAnnotationPresent(ConversionToken.class));
+        // 2. Determina o modo atual (pode ter mudado acima)
+        boolean isConversionMode = input.getContext().isConversion();
+
+        // 3. Nativos (Apenas se não for conversão e não for o 0x39)
+        if (!isConversionMode && opcode >= EX_ExtendedNative) {
+            return readNativeCall(input, opcode);
+        }
+
+        // 4. Busca a classe no mapa correto
+        Class<? extends Token> tokenClass = isConversionMode ? 
+            conversionTokenTable.get(opcode) : mainTokenTable.get(opcode);
+
+        if (tokenClass == null) {
+            String tableName = isConversionMode ? "Conversion" : "Main";
+            throw new IOException(String.format("Unknown token: %02x, table: %s", opcode, tableName));
+        }
+
+        // 5. Instanciação
+        Token token;
+        try {
+            token = tokenClass.newInstance();
+        } catch (ReflectiveOperationException e) {
+            throw new SerializerException(e);
+        }
+
+        // 6. TRATAMENTO PÓS-INSTÂNCIA: Se o token lido for de conversão (e não o 0x39), volte para Main
+        // Isso garante que o próximo token lido após o VectorToRotator seja da Main
+        if (isConversionMode && opcode != 0x39 && token.getClass().isAnnotationPresent(ConversionToken.class)) {
+            input.getContext().changeConversion();
+        }
+
+        return token;
     }
+
+	/**
+	 * @return the log
+	 */
+	public static Logger getLog() {
+		return log;
+	}
 }
