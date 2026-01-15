@@ -36,6 +36,7 @@ public class ReflectionUtil {
 
     public static void fieldSet(Field field, Object obj, Object value) {
         try {
+            field.setAccessible(true); // ← ADICIONA
             field.set(obj, value);
         } catch (IllegalAccessException e) {
             throw new SerializerException(e);
@@ -44,6 +45,7 @@ public class ReflectionUtil {
 
     public static Object fieldGet(Field field, Object obj) {
         try {
+            field.setAccessible(true); // ← ADICIONA
             return field.get(obj);
         } catch (IllegalAccessException e) {
             throw new SerializerException(e);

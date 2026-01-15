@@ -1,6 +1,8 @@
 package org.l2explorer.unreal.bytecode.token;
 
 import org.l2explorer.unreal.UnrealRuntimeContext;
+import org.l2explorer.unreal.bytecode.token.annotation.ConversionToken;
+
 import java.util.Objects;
 
 /**
@@ -14,6 +16,7 @@ import java.util.Objects;
  *
  * @since 13-01-2026
  */
+@ConversionToken
 public class StringToByte extends Token {
     /**
      * The bytecode opcode for StringToByte conversion.

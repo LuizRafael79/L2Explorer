@@ -1,6 +1,7 @@
 package org.l2explorer.unreal.bytecode.token;
 
 import java.util.Objects;
+import org.l2explorer.io.UnrealPackage;
 import org.l2explorer.io.annotation.Compact;
 import org.l2explorer.unreal.UnrealRuntimeContext;
 import org.l2explorer.unreal.annotation.ObjectRef;
@@ -93,7 +94,21 @@ public class Metacast extends Token {
      */
     @Override
     public String toString(UnrealRuntimeContext context) {
-        String className = context.getUnrealPackage().objectReference(classRef).getObjectName().getName();
+        String className;
+        
+        try {
+            // Busca a referência da classe com proteção contra nulo/erro
+            Object refObj = context.getUnrealPackage().objectReference(classRef);
+            
+            if (refObj instanceof UnrealPackage.Entry<?>) {
+                className = ((UnrealPackage.Entry<?>) refObj).getObjectName().getName();
+            } else {
+                className = classRef == 0 ? "None" : "UnknownClass_" + classRef;
+            }
+        } catch (Exception e) {
+            className = "ErrorClass_" + classRef;
+        }
+
         String valStr = (value == null) ? "null" : value.toString(context);
         return "class<" + className + ">(" + valStr + ")";
     }

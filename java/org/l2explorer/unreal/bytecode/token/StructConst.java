@@ -18,11 +18,11 @@ import java.util.Objects;
  *
  * @since 13-01-2026
  */
-public class StructCmpNe extends Token {
+public class StructConst extends Token {
     /**
      * The bytecode opcode for Struct inequality comparison.
      */
-    public static final int OPCODE = 0x35;
+    public static final int OPCODE = 0x34;
 
     /**
      * Reference to the Struct object defining the layout.
@@ -44,7 +44,7 @@ public class StructCmpNe extends Token {
     /**
      * Default constructor for serialization and reflection.
      */
-    public StructCmpNe() {
+    public StructConst() {
     }
 
     /**
@@ -54,7 +54,7 @@ public class StructCmpNe extends Token {
      * @param left The left operand.
      * @param right The right operand.
      */
-    public StructCmpNe(int structRef, Token left, Token right) {
+    public StructConst(int structRef, Token left, Token right) {
         this.structRef = structRef;
         this.left = left;
         this.right = right;
@@ -155,7 +155,7 @@ public class StructCmpNe extends Token {
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
-        StructCmpNe that = (StructCmpNe) o;
+        StructConst that = (StructConst) o;
         return structRef == that.structRef &&
                 Objects.equals(left, that.left) &&
                 Objects.equals(right, that.right);

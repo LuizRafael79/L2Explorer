@@ -10,6 +10,7 @@ public class UnrealOpcode {
         LOCAL_VARIABLE(0x00, LocalVariable.class, "LocalVariable"),
         INSTANCE_VARIABLE(0x01, InstanceVariable.class, "InstanceVariable"),
         DEFAULT_VARIABLE(0x02, DefaultVariable.class, "DefaultVariable"),
+        STATE_VARIABLE(0x03, StateVariable.class, "StateVariable"),
         RETURN(0x04, Return.class, "Return"),
         SWITCH(0x05, Switch.class, "Switch"),
         JUMP(0x06, Jump.class, "Jump"),
@@ -19,7 +20,7 @@ public class UnrealOpcode {
         CASE(0x0a, Case.class, "Case"),
         NOTHING(0x0b, Nothing.class, "Nothing"),
         LABEL_TABLE(0x0c, LabelTable.class, "LabelTable"),
-        GOTO_LABEL(0x0d, GotoLabel.class, "GotoLabel"),
+        GOTO_LABEL(0x0d, GotoLabel.class, "GotoLabel"),        
         EAT_STRING(0x0e, EatString.class, "EatString"),
         LET(0x0f, Let.class, "Let"),
         DYN_ARRAY_ELEMENT(0x10, DynArrayElement.class, "DynArrayElement"),
@@ -27,6 +28,7 @@ public class UnrealOpcode {
         CLASS_CONTEXT(0x12, ClassContext.class, "ClassContext"),
         METACAST(0x13, Metacast.class, "Metacast"),
         LET_BOOL(0x14, LetBool.class, "LetBool"),
+        END_PARM_VALUES(0x15, EndParmValues.class, "EndParmValues"),
         END_FUNCTION_PARAMS(0x16, EndFunctionParams.class, "EndFunctionParams"),
         SELF(0x17, Self.class, "Self"),
         SKIP(0x18, Skip.class, "Skip"),
@@ -48,6 +50,7 @@ public class UnrealOpcode {
         FALSE(0x28, False.class, "False"),
         NATIVE_PARAM(0x29, NativeParam.class, "NativeParam"),
         NO_OBJECT(0x2a, NoObject.class, "NoObject"),
+        DELEGATE_FUNCTION(0x2b, DelegateFunction.class, "DelegateFunction"),
         INT_CONST_BYTE(0x2c, IntConstByte.class, "IntConstByte"),
         BOOL_VARIABLE(0x2d, BoolVariable.class, "BoolVariable"),
         DYNAMIC_CAST(0x2e, DynamicCast.class, "DynamicCast"),
@@ -56,6 +59,8 @@ public class UnrealOpcode {
         ITERATOR_NEXT(0x31, IteratorNext.class, "IteratorNext"),
         STRUCT_CMP_EQ(0x32, StructCmpEq.class, "StructCmpEq"),
         STRUCT_CMP_NE(0x33, StructCmpNe.class, "StructCmpNe"),
+        STRUCT_CONST(0x34, StructConst.class, "StructConst"),
+        RANGE_CONST(0x35, RangeConst.class, "RangeConst"),
         STRUCT_MEMBER(0x36, StructMember.class, "StructMember"),
         LENGTH(0x37, Length.class, "Length"),
         GLOBAL_FUNCTION(0x38, GlobalFunction.class, "GlobalFunction"),
@@ -64,30 +69,7 @@ public class UnrealOpcode {
         REMOVE(0x41, Remove.class, "Remove"),
         DELEGATE_NAME(0x44, DelegateName.class, "DelegateName"),
         INT64_CONST(0x46, INT64Const.class, "INT64Const"),
-        DYN_ARRAY_SORT(0x47, DynArraySort.class, "DynArraySort");
-
-        private final int opcode;
-        private final Class<? extends Token> bytecode;
-        private final String name;
-
-        Main(int opcode, Class<? extends Token> mainclass, String name) {
-            this.opcode = opcode;
-            this.bytecode = mainclass;
-            this.name = name;
-            }
-
-        public int getOpcode() { return opcode; }
-        public Class<? extends Token> getBytecode() { return bytecode; }
-        public String getName() { return name; }
-
-        private static final Map<Integer, Main> LOOKUP = new HashMap<>();
-        static {
-            for (Main op : values()) LOOKUP.put(op.opcode, op);
-        }
-        public static Main fromInt(int op) { return LOOKUP.get(op); }
-    }
-
-    public enum Conversion {
+        DYN_ARRAY_SORT(0x47, DynArraySort.class, "DynArraySort"),
         BYTE_TO_INT(0x3a, ByteToInt.class, "ByteToInt"),
         BYTE_TO_BOOL(0x3b, ByteToBool.class, "ByteToBool"),
         BYTE_TO_FLOAT(0x3c, ByteToFloat.class, "ByteToFloat"),
@@ -121,6 +103,7 @@ public class UnrealOpcode {
         VECTOR_TO_STRING(0x58, VectorToString.class, "VectorToString"),
         ROTATOR_TO_STRING(0x59, RotatorToString.class, "RotatorToString"),
         BYTE_TO_INT64(0x5a, ByteToINT64.class, "ByteToINT64"),
+        MBYTE_TO_INT64(0x5a, MByteToINT64.class, "MByteToINT64"),
         INT_TO_INT64(0x5b, IntToINT64.class, "IntToINT64"),
         BOOL_TO_INT64(0x5c, BoolToINT64.class, "BoolToINT64"),
         FLOAT_TO_INT64(0x5d, FloatToINT64.class, "FloatToINT64"),
@@ -130,25 +113,25 @@ public class UnrealOpcode {
         INT64_TO_BOOL(0x61, INT64ToBool.class, "INT64ToBool"),
         INT64_TO_FLOAT(0x62, INT64ToFloat.class, "INT64ToFloat"),
         INT64_TO_STRING(0x63, INT64ToString.class, "INT64ToString");
-
+    	
         private final int opcode;
         private final Class<? extends Token> bytecode;
         private final String name;
 
-        Conversion(int opcode, Class<? extends Token> conversionClass, String name) {
+        Main(int opcode, Class<? extends Token> mainclass, String name) {
             this.opcode = opcode;
-            this.bytecode = conversionClass;
+            this.bytecode = mainclass;
             this.name = name;
-        }
+            }
 
         public int getOpcode() { return opcode; }
         public Class<? extends Token> getBytecode() { return bytecode; }
         public String getName() { return name; }
 
-        private static final Map<Integer, Conversion> LOOKUP = new HashMap<>();
+        private static final Map<Integer, Main> LOOKUP = new HashMap<>();
         static {
-            for (Conversion op : values()) LOOKUP.put(op.opcode, op);
+            for (Main op : values()) LOOKUP.put(op.opcode, op);
         }
-        public static Conversion fromInt(int op) { return LOOKUP.get(op); }
+        public static Main fromInt(int op) { return LOOKUP.get(op); }
     }
 }

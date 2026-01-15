@@ -2,6 +2,7 @@ package org.l2explorer.unreal.bytecode.token;
 
 import java.util.Objects;
 import org.l2explorer.unreal.UnrealRuntimeContext;
+import org.l2explorer.unreal.annotation.ObjectRef;
 import org.l2explorer.unreal.bytecode.token.annotation.ConversionToken;
 
 /**
@@ -24,6 +25,9 @@ public class ObjectToString extends Token {
 
     private Token value;
 
+    @ObjectRef
+    private int objectIndex;
+    
     /**
      * Default constructor for ObjectToString.
      */
@@ -76,9 +80,21 @@ public class ObjectToString extends Token {
      * @param context The runtime context for the Unreal engine.
      * @return The formatted string "string(value)".
      */
-    @Override
     public String toString(UnrealRuntimeContext context) {
-        String valStr = (value == null) ? "null" : value.toString(context);
-        return "string(" + valStr + ")";
+        if (objectIndex == 0) {
+            return "None";
+        }
+        
+        try {
+            Object entry = context.getUnrealPackage().objectReference(objectIndex);
+            
+            if (entry == null) {
+                return "None";
+            }
+
+            return String.valueOf(entry);
+        } catch (Exception e) {
+            return "UnknownObject_" + objectIndex;
+        }
     }
 }

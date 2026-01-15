@@ -99,36 +99,51 @@ public class FinalFunction extends Token {
      * * @param context The runtime context for the Unreal engine.
      * @return The formatted function call (e.g., "Super.Notify()" or "Calculate()").
      */
+    
     @Override
     public String toString(UnrealRuntimeContext context) {
-        UnrealPackage.Entry<?> func = context.getUnrealPackage().objectReference(funcRef);
-        String prefix = "";
-
-        if (context.getSerializer() != null && context.getEntry() != null) {
-            UnrealPackage.Entry<?> entryHolder = context.getEntry().getObjectPackage();
-            UnrealPackage.Entry<?> funcHolder = func.getObjectPackage();
-            
-            if (entryHolder != null && funcHolder != null &&
-                !Objects.equals(entryHolder.getObjectFullName(), funcHolder.getObjectFullName())) {
-                
-                try {
-                    if (context.getSerializer().isSubclass(funcHolder.getObjectFullName(), entryHolder.getObjectFullName())) {
-                        String fullPath = entryHolder.getObjectFullName() + "." + func.getObjectName().getName();
-                        
-                        // Using environment.getExportEntry instead of getEnvironment()...
-                        if (context.getSerializer().getOrCreateObject(fullPath, "Core.Function"::equalsIgnoreCase) != null) {
-                            prefix = "Super.";
-                        }
-                    }
-                } catch (Exception ignore) {
-                    // Fallback if class resolution fails
-                }
-            }
+        // 1. Busca a referência da função com proteção contra nulo
+        Object ref = context.getUnrealPackage().objectReference(funcRef);
+        if (!(ref instanceof UnrealPackage.Entry<?>)) {
+            return "/* UnknownFunc_" + funcRef + " */" + formatParams(context);
         }
 
-        String paramsStr = (params == null) ? "" : 
-            Arrays.stream(params).map(p -> p.toString(context)).collect(Collectors.joining(", "));
+        UnrealPackage.Entry<?> func = (UnrealPackage.Entry<?>) ref;
+        String prefix = "";
 
-        return prefix + func.getObjectName().getName() + "(" + paramsStr + ")";
+        // 2. Lógica de detecção de 'Super.' (Protegida contra NullPointerException)
+        try {
+            if (context.getSerializer() != null && context.getEntry() != null) {
+                UnrealPackage.Entry<?> entryHolder = context.getEntry().getObjectPackage();
+                UnrealPackage.Entry<?> funcHolder = func.getObjectPackage();
+                
+                // Só entra na lógica se ambos os holders existirem e forem diferentes
+                if (entryHolder != null && funcHolder != null &&
+                    !Objects.equals(entryHolder.getObjectFullName(), funcHolder.getObjectFullName())) {
+                    
+                    if (context.getSerializer().isSubclass(funcHolder.getObjectFullName(), entryHolder.getObjectFullName())) {
+                        prefix = "Super.";
+                    }
+                }
+            }
+        } catch (Exception ignore) {
+            // Se a verificação de subclasse falhar, apenas ignoramos o prefixo Super.
+        }
+
+        // 3. Retorna o nome da função + parâmetros
+        String funcName = func.getObjectName().getName();
+        return prefix + funcName + formatParams(context);
+    }
+
+    /**
+     * Helper para formatar os parâmetros sem poluir o método principal.
+     */
+    private String formatParams(UnrealRuntimeContext context) {
+        if (params == null || params.length == 0) {
+            return "()";
+        }
+        return "(" + Arrays.stream(params)
+                .map(p -> p == null ? "null" : p.toString(context))
+                .collect(Collectors.joining(", ")) + ")";
     }
 }

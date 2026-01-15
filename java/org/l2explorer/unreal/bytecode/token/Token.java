@@ -154,4 +154,33 @@ public abstract class Token {
     interface Sizer<T extends Token> {
         int getSize(T token, BytecodeContext context);
     }
+    
+    /**
+     * Helper para resolver nomes de objetos com segurança
+     */
+    protected static String safeGetObjectName(UnrealRuntimeContext context, int ref) {
+        try {
+            var entry = context.getUnrealPackage().objectReference(ref);
+            if (entry == null) return "Ref" + ref;
+            var name = entry.getObjectName();
+            if (name == null) return "Ref" + ref + "_NoName";
+            return name.getName();
+        } catch (Exception e) {
+            return "Ref" + ref + "_Error";
+        }
+    }
+    
+    /**
+     * Helper para resolver nomes da NameTable com segurança
+     */
+    protected static String safeGetName(UnrealRuntimeContext context, int nameIdx) {
+        try {
+            if (nameIdx < 0 || nameIdx >= context.getUnrealPackage().getNameTable().size()) {
+                return "Name" + nameIdx;
+            }
+            return context.getUnrealPackage().nameReference(nameIdx);
+        } catch (Exception e) {
+            return "Name" + nameIdx + "_Error";
+        }
+    }
 }

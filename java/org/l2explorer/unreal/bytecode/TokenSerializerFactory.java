@@ -60,13 +60,12 @@ public class TokenSerializerFactory extends ReflectionSerializerFactory<Bytecode
     @Override
     protected Function<ObjectInput<BytecodeContext>, Object> createInstantiator(Class<?> clazz) {
         if (Token.class.isAssignableFrom(clazz)) {
-            return arg0 -> {
+            return input -> {
                 try {
-                    // Chama o seu método instantiate(arg0)
-                    return instantiate(arg0);
+                    return instantiate(input);
                 } catch (IOException e) {
-                    // IMPORTANTE: Lançar a exceção impede que o Java tente 
-                    // fazer o cast de UnrealObjectInput para Token
+                    // Lançamos a exceção real. Isso impede o ClassCastException 
+                    // e faz o erro "Unknown token" aparecer na tela da função.
                     throw new SerializerException(e);
                 }
             };
@@ -170,71 +169,107 @@ public class TokenSerializerFactory extends ReflectionSerializerFactory<Bytecode
         return context.getUnrealPackage().nameReference("None");
     }
 
+    private Token instantiate(ObjectInput<BytecodeContext> input) throws IOException {
+        int opcode = input.readUnsignedByte();
+        
+        BytecodeContext ctx = input.getContext();
+        boolean isConversion = ctx.isConversion();
+
+        Class<? extends Token> tokenClass = isConversion ? 
+            conversionTokenTable.get(opcode) : mainTokenTable.get(opcode);
+
+        if (tokenClass == null && !isConversion && opcode >= EX_ExtendedNative) {
+            return readNativeCall(input, opcode);
+        }
+
+        if (tokenClass == null) {
+            // ===== LOG COMPLETO =====
+            System.out.println(">>> ERROR: Token 0x" + String.format("%02X", opcode) + 
+                              " not found in " + (isConversion ? "Conversion" : "Main") + " table");
+            System.out.println(">>> isConversion state: " + isConversion);
+            System.out.println(">>> Context hash: " + System.identityHashCode(ctx));
+            System.out.println(">>> Main table has: " + mainTokenTable.keySet());
+            System.out.println(">>> Conversion table has: " + conversionTokenTable.keySet());
+            // ===== FIM LOG =====
+            
+            throw new IOException(String.format("Unknown token: %02x, table: %s", 
+                opcode, isConversion ? "Conversion" : "Main"));
+        }
+
+        try {
+            Token token = tokenClass.getDeclaredConstructor().newInstance();
+
+            if (opcode == 0x39) {
+                System.out.println(">>> Found ConversionTable (0x39), switching to Conversion mode");
+                ctx.changeConversion();
+            } 
+            else if (isConversion) {
+                System.out.println(">>> Was in Conversion mode, switching back to Main");
+                ctx.changeConversion();
+            }
+
+            return token;
+
+        } catch (Exception e) {
+            throw new SerializerException("Falha ao instanciar token 0x" + Integer.toHexString(opcode), e);
+        }
+    }
+
+    /**
+     * Registers a token class into the appropriate table based on the @ConversionToken annotation.
+     * Uses reflection to read the static OPCODE field from the class.
+     * * @param clazz The token class to register.
+     */
     private static void register(Class<? extends Token> clazz) {
         if (clazz == null) return;
 
+        System.out.println(">>> register() called with: " + clazz.getSimpleName());
+
         try {
-            // Pega o campo OPCODE da classe (Ex: public static final int OPCODE = 0x3E)
             java.lang.reflect.Field field = clazz.getDeclaredField("OPCODE");
             field.setAccessible(true);
             int opcode = field.getInt(null);
+            
+            System.out.println("    OPCODE: 0x" + String.format("%02X", opcode));
 
-            // Decide a tabela pela anotação
             boolean isConv = clazz.isAnnotationPresent(ConversionToken.class);
+            System.out.println("    Has @ConversionToken: " + isConv);
+            
             Map<Integer, Class<? extends Token>> table = isConv ? conversionTokenTable : mainTokenTable;
-
-            table.put(opcode, clazz);
+            
+            Class<? extends Token> old = table.put(opcode, clazz);
+            if (old != null) {
+                System.out.println("    ⚠️  REPLACED: " + old.getSimpleName() + " with " + clazz.getSimpleName());
+            }
+            
+            System.out.println("    ✅ Registered in " + (isConv ? "Conversion" : "Main") + " table");
+            
+        } catch (NoSuchFieldException e) {
+            System.out.println("    ❌ No OPCODE field found!");
         } catch (Exception e) {
-            // Ignora classes que não possuem o campo OPCODE
+            System.out.println("    ❌ Error: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 
     static {
-        // Registra os tokens percorrendo os seus Enums
-        for (UnrealOpcode.Main op : UnrealOpcode.Main.values()) register(op.getBytecode());
-        for (UnrealOpcode.Conversion op : UnrealOpcode.Conversion.values()) register(op.getBytecode());
+        mainTokenTable.clear();
+        conversionTokenTable.clear();
+
+        // Registra tudo
+        for (UnrealOpcode.Main op : UnrealOpcode.Main.values()) {
+            register(op.getBytecode());
+        }
         
-        // Registro explícito do wrapper 0x39
-        register(ConversionTable.class);
+        // DEBUG - VE SE AS TABELAS TÃO POPULADAS
+        System.out.println("=== TABELAS INICIALIZADAS ===");
+        System.out.println("Main table size: " + mainTokenTable.size());
+        System.out.println("Conversion table size: " + conversionTokenTable.size());
+        System.out.println("Main opcodes: " + mainTokenTable.keySet());
+        System.out.println("Conversion opcodes: " + conversionTokenTable.keySet());
+        System.out.println("=============================");
     }
     
-    private Token instantiate(ObjectInput<BytecodeContext> input) throws IOException {
-        int opcode = input.readUnsignedByte();
-        
-        // Pega o estado do contexto ANTES de decidir a tabela
-        boolean isConversionMode = input.getContext().isConversion();
-
-        // Nativos (Apenas na Main)
-        if (!isConversionMode && opcode >= EX_ExtendedNative) {
-            return readNativeCall(input, opcode);
-        }
-
-        // Busca a classe no mapa baseado no modo ATUAL
-        Class<? extends Token> tokenClass = isConversionMode ? 
-            conversionTokenTable.get(opcode) : mainTokenTable.get(opcode);
-
-        if (tokenClass == null) {
-            String table = isConversionMode ? "Conversion" : "Main";
-            throw new IOException(String.format("Unknown token: %02x, table: %s", opcode, table));
-        }
-
-        Token token;
-        try {
-            token = tokenClass.getDeclaredConstructor().newInstance();
-        } catch (Exception e) {
-            throw new SerializerException(e);
-        }
-
-        // LÓGICA DE TRANSIÇÃO (Igual ao original)
-        if (opcode == 0x39) {
-            input.getContext().changeConversion();
-        } else if (isConversionMode && token.getClass().isAnnotationPresent(ConversionToken.class)) {
-            input.getContext().changeConversion();
-        }
-
-        return token;
-    }
-
 	/**
 	 * @return the log
 	 */

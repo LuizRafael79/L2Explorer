@@ -1,52 +1,79 @@
 package org.l2explorer.app;
 
-import javax.swing.*;
+import com.formdev.flatlaf.FlatDarkLaf;
 import org.l2explorer.io.UnrealPackage;
-import org.l2explorer.io.RandomAccessFile;
+import javax.swing.*;
 import java.io.File;
-import java.nio.charset.StandardCharsets;
 
 public class Main {
     public static void main(String[] args) {
+        // Configura FlatLaf ANTES de criar qualquer UI
         try {
-            UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-        } catch (Exception ignored) {}
+            UIManager.setLookAndFeel(new FlatDarkLaf());
+            UIManager.put("Button.arc", 8);
+            UIManager.put("Component.arc", 8);
+            UIManager.put("TextComponent.arc", 8);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
 
         SwingUtilities.invokeLater(() -> {
-            // 1. JFileChooser para selecionar o arquivo .u
-            JFileChooser chooser = new JFileChooser(new File("."));
-            chooser.setDialogTitle("L2Explorer - Selecione um pacote Unreal (.u)");
-            
-            if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
-                File selectedFile = chooser.getSelectedFile();
+            try {
+                File packageFile = null;
                 
-                try {
-                    // 2. Motor de leitura do ACMI
-                    RandomAccessFile ra = new RandomAccessFile(selectedFile, true, StandardCharsets.ISO_8859_1);
-                    UnrealPackage up = new UnrealPackage(ra);
-
-                    // 3. Janela Principal
-                    JFrame frame = new JFrame("L2Explorer 2026 - [" + selectedFile.getName() + "]");
-                    frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-                    
-                    // 4. Injeta o pacote no painel
-                    // IMPORTANTE: Precisamos passar a pasta base para o descompilador!
-                    ExplorerPanel panel = new ExplorerPanel(up, selectedFile.getParentFile());
-                    
-                    frame.setContentPane(panel);
-                    frame.pack();
-                    frame.setSize(1200, 850);
-                    frame.setLocationRelativeTo(null);
-                    frame.setVisible(true);
-
-                    System.out.println("L2Explorer: " + selectedFile.getName() + " carregado!");
-                    
-                } catch (Exception e) {
-                    e.printStackTrace();
-                    JOptionPane.showMessageDialog(null, "Erro: " + e.getMessage());
+                // Tenta carregar o último package
+                String lastPackage = GeneralConfig.getLastPackage();
+                if (!lastPackage.isEmpty() && new File(lastPackage).exists()) {
+                    packageFile = new File(lastPackage);
+                } else {
+                    // Tenta o default
+                    File defaultFile = new File("InterfaceSamurai.u");
+                    if (defaultFile.exists()) {
+                        packageFile = defaultFile;
+                    }
                 }
-            } else {
-                System.exit(0); // Usuário cancelou
+                
+                // Se não achou nenhum, abre o seletor
+                if (packageFile == null || !packageFile.exists()) {
+                    JFileChooser chooser = new JFileChooser(GeneralConfig.getLastDirectory());
+                    chooser.setDialogTitle("Select Unreal Package");
+                    chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+                        "Unreal Package (*.u, *.utx, *.unr)", "u", "utx", "unr"));
+                    
+                    if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
+                        packageFile = chooser.getSelectedFile();
+                        GeneralConfig.setLastDirectory(packageFile.getParent());
+                        GeneralConfig.setLastPackage(packageFile.getAbsolutePath());
+                    } else {
+                        // Usuário cancelou
+                        System.out.println("No package selected. Exiting.");
+                        return;
+                    }
+                }
+
+                // Carrega o package
+                UnrealPackage up = new UnrealPackage(packageFile, true);
+
+                // Cria a janela
+                JFrame frame = new JFrame("L2Explorer 2026 - " + packageFile.getName());
+                frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+                frame.setSize(1400, 900);
+                frame.setLocationRelativeTo(null);
+
+                ExplorerPanel panel = new ExplorerPanel(up, packageFile.getParentFile());
+                frame.setContentPane(panel);
+
+                frame.setVisible(true);
+                
+                System.out.println("✅ L2Explorer started with: " + packageFile.getName());
+
+            } catch (Exception e) {
+                e.printStackTrace();
+                JOptionPane.showMessageDialog(null,
+                    "Failed to load package:\n" + e.getMessage(),
+                    "Startup Error",
+                    JOptionPane.ERROR_MESSAGE);
+                System.exit(1);
             }
         });
     }

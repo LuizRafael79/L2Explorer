@@ -80,6 +80,18 @@ public class LocalVariable extends Token {
      */
     @Override
     public String toString(UnrealRuntimeContext context) {
-        return context.getUnrealPackage().objectReference(objRef).getObjectName().getName();
+        try {
+            var entry = context.getUnrealPackage().objectReference(objRef);
+            if (entry == null) {
+                return "LocalVar_Ref" + objRef;
+            }
+            var name = entry.getObjectName();
+            if (name == null) {
+                return "LocalVar_NoName" + objRef;
+            }
+            return name.getName();
+        } catch (Exception e) {
+            return "LocalVar_Error" + objRef;
+        }
     }
 }

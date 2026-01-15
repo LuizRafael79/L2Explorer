@@ -1,5 +1,6 @@
 package org.l2explorer.unreal.bytecode.token;
 
+import org.l2explorer.io.UnrealPackage;
 import org.l2explorer.io.annotation.Compact;
 import org.l2explorer.unreal.UnrealRuntimeContext;
 import org.l2explorer.unreal.annotation.ObjectRef;
@@ -116,10 +117,21 @@ public class StructMember extends Token {
     @Override
     public String toString(UnrealRuntimeContext context) {
         String base = (struct != null) ? struct.toString(context) : "None";
-        String memberName = context.getUnrealPackage()
-                .objectReference(objRef)
-                .getObjectName()
-                .getName();
+        String memberName;
+
+        try {
+            // Busca a referência do membro (variável dentro da struct)
+            Object refObj = context.getUnrealPackage().objectReference(objRef);
+            
+            if (refObj instanceof UnrealPackage.Entry<?>) {
+                memberName = ((UnrealPackage.Entry<?>) refObj).getObjectName().getName();
+            } else {
+                memberName = objRef == 0 ? "None" : "UnknownMember_" + objRef;
+            }
+        } catch (Exception e) {
+            // Previne falha se o índice apontar para fora da tabela
+            memberName = "ErrorMember_" + objRef;
+        }
         
         return base + "." + memberName;
     }

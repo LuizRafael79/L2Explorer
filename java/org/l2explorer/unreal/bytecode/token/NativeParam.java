@@ -80,6 +80,6 @@ public class NativeParam extends Token {
      */
     @Override
     public String toString(UnrealRuntimeContext context) {
-        return context.getUnrealPackage().objectReference(objRef).getObjectName().getName();
+        return safeGetObjectName(context, objRef);
     }
 }

@@ -84,14 +84,30 @@ public class ObjectConst extends Token {
      */
     @Override
     public String toString(UnrealRuntimeContext context) {
-        UnrealPackage.Entry<?> reference = context.getUnrealPackage().objectReference(objRef);
-        String name = reference.getObjectName().getName();
-        
-        // Handle class literal formatting
-        if ("Core.Class".equalsIgnoreCase(reference.getFullClassName())) {
-            return "class'" + name + "'";
+        if (objRef == 0) {
+            return "None";
         }
-        
-        return name;
+
+        try {
+            // Busca a referência com proteção contra nulo
+            Object refObj = context.getUnrealPackage().objectReference(objRef);
+            
+            if (!(refObj instanceof UnrealPackage.Entry<?>)) {
+                return "UnknownObject_" + objRef;
+            }
+
+            UnrealPackage.Entry<?> reference = (UnrealPackage.Entry<?>) refObj;
+            String name = reference.getObjectName().getName();
+            
+            // Lógica original de formatação de classe literal
+            if ("Core.Class".equalsIgnoreCase(reference.getFullClassName())) {
+                return "class'" + name + "'";
+            }
+            
+            return name;
+        } catch (Exception e) {
+            // Fallback em caso de erro de alinhamento ou índice inválido
+            return "/* ErrorRef_" + objRef + " */";
+        }
     }
 }

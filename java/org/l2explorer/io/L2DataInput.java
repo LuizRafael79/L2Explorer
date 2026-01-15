@@ -91,21 +91,15 @@ public interface L2DataInput {
     // --- Métodos Específicos de String e Arrays do L2 ---
 
     default int readCompactInt() throws IOException {
-        // Implementação direta sem depender de ByteUtil se preferir simplificar
-        int output = 0;
-        boolean signed = false;
-        for (int i = 0; i < 5; i++) {
-            int b = readUnsignedByte();
-            if (i == 0) {
-                if ((b & 0x80) != 0) signed = true;
-                output |= (b & 0x3F);
-                if ((b & 0x40) == 0) break;
-            } else {
-                output |= (b & 0x7F) << (6 + (i - 1) * 7);
-                if ((b & 0x80) == 0) break;
-            }
-        }
-        return signed ? -output : output;
+        return ByteUtil.compactIntFromBytes(() -> {
+			try {
+				return readUnsignedByte();
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+			return 0;
+		});
     }
 
     default String readLine() throws IOException {

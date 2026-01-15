@@ -188,8 +188,13 @@ public class ReflectionSerializerFactory<C extends Context> implements Serialize
             if (getAnnotation.apply(Compact.class) != null) {
                 read.add((object, dataInput) -> {
                     try { setter.accept(object, () -> {
-                        try { return dataInput.readCompactInt(); } 
-                        catch (IOException e) { throw new RuntimeException(e); }
+                        try {
+							return dataInput.readCompactInt();
+						} catch (IOException e) {
+							// TODO Auto-generated catch block
+							e.printStackTrace();
+						}
+						return object;
                     }); } catch (Exception e) { throw new RuntimeException(e); }
                 });
                 write.add((object, dataOutput) -> {
@@ -257,20 +262,24 @@ public class ReflectionSerializerFactory<C extends Context> implements Serialize
         } else if (type.isArray()) {
             Class componentType = type.getComponentType();
             read.add((object, dataInput) -> {
-                try {
-                    int len = dataInput.readCompactInt();
-                    Object array = Array.newInstance(componentType, len);
-                    for (int i = 0; i < len; i++) {
-                        int ind = i;
-                        List<BiConsumer<Object, ObjectInput<C>>> arrayRead = new ArrayList<>();
-                        List<BiConsumer<Object, ObjectOutput<C>>> arrayWrite = new ArrayList<>();
-                        serializer(componentType, arr -> Array.get(arr, ind), (arr, val) -> Array.set(arr, ind, val.get()), getAnnotation, arrayRead, arrayWrite);
-                        for (BiConsumer<Object, ObjectInput<C>> ra : arrayRead) {
-                            ra.accept(array, dataInput);
-                        }
-                    }
-                    setter.accept(object, () -> array);
-                } catch (IOException e) { throw new RuntimeException(e); }
+                int len = 0;
+				try {
+					len = dataInput.readCompactInt();
+				} catch (IOException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+				Object array = Array.newInstance(componentType, len);
+				for (int i = 0; i < len; i++) {
+				    int ind = i;
+				    List<BiConsumer<Object, ObjectInput<C>>> arrayRead = new ArrayList<>();
+				    List<BiConsumer<Object, ObjectOutput<C>>> arrayWrite = new ArrayList<>();
+				    serializer(componentType, arr -> Array.get(arr, ind), (arr, val) -> Array.set(arr, ind, val.get()), getAnnotation, arrayRead, arrayWrite);
+				    for (BiConsumer<Object, ObjectInput<C>> ra : arrayRead) {
+				        ra.accept(array, dataInput);
+				    }
+				}
+				setter.accept(object, () -> array);
             });
             write.add((object, dataOutput) -> {
                 try {
