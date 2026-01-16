@@ -3,13 +3,14 @@
  */
 package org.l2explorer.utils.unreal;
 
+import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
-import java.lang.Class;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -20,6 +21,8 @@ import org.l2explorer.io.ObjectInput;
 import org.l2explorer.io.Serializer;
 import org.l2explorer.io.UnrealPackage;
 import org.l2explorer.io.UnrealPackage.ExportEntry;
+import org.l2explorer.resources.textures.Img;
+import org.l2explorer.resources.textures.MipMapInfo;
 import org.l2explorer.unreal.SimpleEnv;
 import org.l2explorer.unreal.UnrealRuntimeContext;
 import org.l2explorer.unreal.UnrealSerializerFactory;
@@ -29,7 +32,6 @@ import org.l2explorer.unreal.bytecode.token.Length;
 import org.l2explorer.unreal.bytecode.token.Token;
 import org.l2explorer.unreal.core.Field;
 import org.l2explorer.unreal.core.Property;
-import org.l2explorer.utils.IOUtil;
 import org.l2explorer.utils.StreamsHelper;
 import org.l2explorer.utils.enums.UnrealOpcode;
 
@@ -37,100 +39,135 @@ import org.l2explorer.utils.enums.UnrealOpcode;
  * Decompiler completo e integrado. 
  * Resolve herança, organiza membros por categoria e extrai Default Properties.
  */
+
 public class UnrealDecompiler {
     private UnrealPackage up;
     private ExplorerPanel.DebugConsole console;
     @SuppressWarnings("unused")
     private byte[] rawData;
     private File baseDir;
+    private UnrealSerializerFactory serializerFactory;
     
-    public UnrealDecompiler(UnrealPackage up, File baseDir) {
+    /**
+     * 
+     * @param up
+     * @param baseDir
+     * UnrealPackage up status and BaseDir configuration
+     */
+    public UnrealDecompiler(UnrealPackage up, UnrealSerializerFactory factory) {
         this.up = up;
-        this.baseDir = baseDir;
+        this.serializerFactory = factory;
     }
 
-    // --- GETTERS E SETTERS (FORA DO CONSTRUTOR) ---
-
+    public File getBaseDir() {
+        return serializerFactory.getBaseDir(); 
+    }
+    
+    /**
+     * 
+     * @return getter for up function
+     */
     public UnrealPackage getUp() {
         return up;
     }
-
+    /**
+     * 
+     * @param up
+     * Setuo uo (check if the UnrealPackage is "up"
+     */
     public void setUp(UnrealPackage up) {
         this.up = up;
     }
 
-    public File getBaseDir() {
-        return baseDir;
-    }
-
+    /**
+     * 
+     * @param baseDir
+     * Get the base dir
+     */
     public void setBaseDir(File baseDir) {
         this.baseDir = baseDir;
     }
-
+    /**
+     * 
+     * @return
+     * Return for getter "getConsole"
+     */
     public ExplorerPanel.DebugConsole getConsole() {
         return console;
     }
-
+    /**
+     * 
+     * @param console
+     * Show message in debug console
+     */
     public void setConsole(ExplorerPanel.DebugConsole console) {
         this.console = console;
     }        
 
+    /**
+     * Decompila uma função usando a factory injetada para resolver tokens e dependências.
+     * @param entry Entrada da função.
+     * @return Código UnrealScript ou Disassembly.
+     */
     public String decompileFunction(ExportEntry entry) throws IOException {
-        UnrealPackage up = entry.getUnrealPackage();
-        // Usamos o seu novo UnrealOpcode.java para o fallback
-        UnrealSerializerFactory serializerFactory = new UnrealSerializerFactory(new SimpleEnv(up));
         StringBuilder sb = new StringBuilder();
-        
+        // Context: Use the injected factory to maintain environment consistency
+        if (this.serializerFactory == null) {
+            this.serializerFactory = new UnrealSerializerFactory(new org.l2explorer.unreal.SimpleEnv(entry.getUnrealPackage()));
+        }
+
         try {
             sb.append("// Entry class: ").append(entry.getFullClassName()).append("\n");
             
-            // --- TENTATIVA 1: SERIALIZER OFICIAL (ACMI) ---
-            Object obj = null;
-            try {
-                obj = serializerFactory.getOrCreateObject(entry);
-            } catch (Exception e) {
-                sb.append("// ⚠️ Serializer failed: ").append(e.getMessage()).append("\n");
-                sb.append("// Falling back to Raw Bytecode Analysis...\n");
-            }
+            // --- TENTATIVA 1: SERIALIZAÇÃO E BYTECODE ---
+            // Tentamos criar o objeto para carregar as propriedades e o estado da função
+            java.lang.Object obj = this.serializerFactory.getOrCreateObject(entry);
 
-            if (obj != null) {
-                // ... (Seu código original de reflexão para o bytecode campo funciona aqui) ...
-                // [Mantenha a lógica do field bytecode que você já tem]
+            if (obj instanceof org.l2explorer.unreal.core.Function) {
+                org.l2explorer.unreal.core.Function func = (org.l2explorer.unreal.core.Function) obj;
+                // Se o motor ACMI conseguiu ler os tokens, usamos o toString do objeto
+                sb.append(func.toString()); 
             } else {
-                // --- TENTATIVA 2: RAW DISASSEMBLER (SAMURAI CROW STYLE) ---
-                // Se o serializer falhou, lemos os bytes brutos e usamos o seu Enum
-                byte[] rawData = entry.getObjectRawData();
-                sb.append(disassembleRawBytecode(rawData));
+                // --- TENTATIVA 2: FALLBACK PARA DISASSEMBLER MANUAL ---
+                // Se a serialização falhou ou o objeto veio vazio, usamos seu motor de leitura bruta
+                byte[] data = entry.getObjectRawData();
+                if (data != null && data.length > 44) {
+                    sb.append(disassembleRawBytecode(data));
+                } else {
+                    sb.append("// [No bytecode data available at offset 44]\n");
+                }
             }
-            
         } catch (Exception e) {
-            // Seu log de erro fatal atual...
+            sb.append("// ❌ Decompile Error: ").append(e.getMessage()).append("\n");
         }
         return sb.toString();
     }
 
     /**
-     * Disassembler de emergência usando o seu UnrealOpcode.Main.
-     * Isso garante que você veja o código mesmo que o Serializer exploda.
+     * 
+     * @param data
+     * @return
+     * Return the disassemble raw byte code
      */
     private String disassembleRawBytecode(byte[] data) {
         StringBuilder dsb = new StringBuilder("// --- RAW DISASSEMBLY ---\n");
-        // Em funções L2, os bytes de header (flags, etc) costumam ocupar os primeiros ~40 bytes
-        // O bytecode real começa onde os tokens estão.
         for (int i = 0; i < data.length; i++) {
             int val = data[i] & 0xFF;
             UnrealOpcode.Main op = UnrealOpcode.Main.fromInt(val);
             
             if (op != null) {
                 dsb.append(String.format("    0x%04X: %s (0x%02X)\n", i, op.getName(), val));
-                // Adicione lógica de skip baseada no token se quiser (ex: se for Jump, pula 2 bytes)
             }
         }
         return dsb.toString();
     }
 
     /**
-     * Versão RAW para debug - mostra TUDO sem interpretar
+     * 
+     * @param entry
+     * @return
+     * @throws IOException
+     * get the Raw Data of Functions, aif fails trhow for exceptioo
      */
     public String decompileFunctionRaw(ExportEntry entry) throws IOException {
         byte[] data = entry.getObjectRawData();
@@ -160,7 +197,11 @@ public class UnrealDecompiler {
     }
 
     /**
-     * Diagnóstico completo da estrutura
+     * 
+     * @param entry
+     * @return
+     * @throws IOException
+     * Diagnosis the function structure, if fails trhow to except
      */
     public String diagnoseFunctionStructure(ExportEntry entry) throws IOException {
         byte[] data = entry.getObjectRawData();
@@ -172,21 +213,18 @@ public class UnrealDecompiler {
         sb.append("Class: ").append(entry.getFullClassName()).append("\n");
         sb.append("Size: ").append(data.length).append(" bytes\n\n");
         
-        // Header completo
         sb.append("=== HEADER (0-64) ===\n");
         for (int i = 0; i < Math.min(64, data.length); i++) {
             if (i % 16 == 0) sb.append(String.format("\n%04X: ", i));
             sb.append(String.format("%02X ", data[i] & 0xFF));
         }
         
-        // ASCII do header
         sb.append("\n\nASCII: ");
         for (int i = 0; i < Math.min(64, data.length); i++) {
             char c = (data[i] >= 32 && data[i] < 127) ? (char)data[i] : '.';
             sb.append(c);
         }
         
-        // Candidatos a tamanho
         sb.append("\n\n=== SIZE CANDIDATES ===\n");
         try (ByteArrayInputStream bais = new ByteArrayInputStream(data)) {
             L2DataInput di = L2DataInput.dataInput(bais, entry.getUnrealPackage().getFile().getCharset());
@@ -211,7 +249,6 @@ public class UnrealDecompiler {
             }
         }
         
-        // Opcodes do bytecode
         sb.append("\n=== BYTECODE OPCODES (offset 44+) ===\n");
         int offset = 44;
         for (int i = offset; i < Math.min(offset + 64, data.length); i++) {
@@ -221,7 +258,6 @@ public class UnrealDecompiler {
             int opcode = data[i] & 0xFF;
             sb.append(String.format("%02X ", opcode));
             
-            // Destaca o 0x37
             if (opcode == 0x37) {
                 sb.append("<LENGTH! ");
             }
@@ -234,7 +270,10 @@ public class UnrealDecompiler {
     }
 
     /**
-     * Testa parsing token por token com debug detalhado
+     * 
+     * @param entry
+     * @param sb
+     * Test Token Parsing using ExportEntry and StringBuilder
      */
     private void testTokenParsing(ExportEntry entry, StringBuilder sb) {
         try {
@@ -252,7 +291,7 @@ public class UnrealDecompiler {
             ObjectInput<BytecodeContext> input = ObjectInput.objectInput(di, tokenFactory, context);
             
             int tokenNum = 0;
-            while (bais.available() > 0 && tokenNum < 10) { // Limita a 10 tokens
+            while (bais.available() > 0 && tokenNum < 10) { // Limit to 10 tokens
                 int pos = data.length - 44 - bais.available();
                 bais.mark(256);
                 int opcode = bais.read() & 0xFF;
@@ -273,7 +312,6 @@ public class UnrealDecompiler {
                     String className = token.getClass().getSimpleName();
                     sb.append(" -> ").append(className);
                     
-                    // Se for Length, detalha o sub-token
                     if (token instanceof Length) {
                         Length lengthToken = 
                             (Length) token;
@@ -294,13 +332,12 @@ public class UnrealDecompiler {
                     sb.append(" -> ERROR: ").append(e.getClass().getSimpleName());
                     sb.append(": ").append(e.getMessage());
                     
-                    // Mostra stack trace resumido
                     StackTraceElement[] stack = e.getStackTrace();
                     if (stack.length > 0) {
                         sb.append("\n    at ").append(stack[0]);
                     }
                     
-                    bais.skip(1); // Pula byte problemático
+                    bais.skip(1); 
                 }
                 
                 tokenNum++;
@@ -312,15 +349,16 @@ public class UnrealDecompiler {
     }
 
     /**
-     * Constrói saída alternativa quando toString() falha ou retorna null
+     * 
+     * @param classEntry
+     * @return
+     * @throws IOException
+     * Decompile the class completely, with fails trhow to Exception
      */
-
-    // ============================ DECOMPILA CLASSE COMPLETA ============================
     public String decompileClassComplete(ExportEntry classEntry) throws IOException {
         StringBuilder sb = new StringBuilder();
         UnrealPackage up = classEntry.getUnrealPackage();
-
-        // --- HEADER DA CLASSE ---
+        
         String superName = "Object";
         try {
             Object superObj = classEntry.getObjectSuperClass();
@@ -339,10 +377,29 @@ public class UnrealDecompiler {
         sb.append("//==============================================================================\n");
         sb.append("class ").append(classEntry.getObjectName().getName());
         sb.append(" extends ").append(superName).append(";\n\n");
-
-        int parentRef = classEntry.getObjectReference(); // ADICIONE ESTA LINHA AQUI
         
-     // --- BUSCA MEMBROS (MAIS RESILIENTE) ---
+        String className = classEntry.getFullClassName();
+     // SE FOR TEXTURA, PARA TUDO E SÓ GERA UM LOG
+        if (className.equals("Engine.Texture")) {
+            sb.append("//==================================================\n");
+            sb.append("// RESOURCE: ").append(classEntry.getObjectName().getName()).append("\n");
+            sb.append("// TYPE: Engine.Texture\n");
+            sb.append("// SIZE: ").append(classEntry.getObjectRawData().length).append(" bytes\n");
+            sb.append("//==================================================\n");
+            
+            // Tenta pegar informações extras das propriedades que você já lê
+            try {
+                 MipMapInfo.getInfo(classEntry).ifPresent(info -> {
+                     sb.append("// Format: ").append(info.properties.getFormat()).append("\n");
+                     sb.append("// Dimension: ").append(info.properties.getWidth()).append("x").append(info.properties.getHeight()).append("\n");
+                 });
+            } catch (Exception ignore) {}
+
+            return sb.toString();
+        }       
+
+        int parentRef = classEntry.getObjectReference(); 
+        
         List<ExportEntry> constants = new ArrayList<>();
         List<ExportEntry> enums = new ArrayList<>();
         List<ExportEntry> structs = new ArrayList<>();
@@ -639,61 +696,63 @@ public class UnrealDecompiler {
     
     public String decompileDefaultProperties(ExportEntry classEntry, List<ExportEntry> properties) throws IOException {
         byte[] data = classEntry.getObjectRawData();
-        if (data == null || data.length < 32) return "";
+        if (data == null || data.length < 4) return "";
 
         StringBuilder sb = new StringBuilder();
         UnrealPackage up = classEntry.getUnrealPackage();
 
         try (ByteArrayInputStream bais = new ByteArrayInputStream(data)) {
-        	L2DataInput di = L2DataInput.dataInput(bais, up.getFile().getCharset());
+            L2DataInput di = L2DataInput.dataInput(bais, up.getFile().getCharset());
 
+            // --- NOVO SCANNER GENÉRICO ---
             int startOffset = -1;
-            for (int i = 0; i < data.length - 8; i++) {
+            // Shaders e Materials costumam ter propriedades bem no início. 
+            // Vamos testar os primeiros 128 bytes em busca de algo que faça sentido.
+            for (int i = 0; i < Math.min(data.length - 4, 128); i++) {
                 bais.reset();
                 bais.skip(i);
-                try {
-                    int nameIdx = di.readCompactInt();
-                    if (nameIdx > 0 && nameIdx < up.getNameTable().size()) {
-                        String name = up.getNameTable().get(nameIdx).getName();
-                        
-                        if (name.equalsIgnoreCase("m_WindowName")) {
-                            startOffset = i;
-                            int infoByte = bais.read();
-                            if ((infoByte & 0x0F) == 11 || (infoByte & 0x0F) == 6) { // String ou Name
-                                break; 
-                            }
-                        }
+                
+                int nameIdx = di.readCompactInt();
+                if (nameIdx > 0 && nameIdx < up.getNameTable().size()) {
+                    String name = up.getNameTable().get(nameIdx).getName();
+                    
+                    // Se acharmos um nome de propriedade conhecido do Unreal ou da sua lista de properties
+                    // O "None" indica o fim, então as propriedades devem estar ANTES dele.
+                    if (isKnownProperty(name, properties) && !name.equals("None")) {
+                        startOffset = i;
+                        break;
                     }
-                } catch (Exception e) {}
-            }
-
-            if (startOffset == -1) {
-                for (int i = data.length - 10; i > 0; i--) {
-                    bais.reset();
-                    bais.skip(i);
-                    try {
-                        int nameIdx = di.readCompactInt();
-                        if (up.getNameTable().get(nameIdx).getName().equalsIgnoreCase("Me")) {
-                            startOffset = i;
-                            break;
-                        }
-                    } catch (Exception e) {}
                 }
             }
 
-            if (startOffset == -1) return "";
+            // Se o scanner genérico falhou, tentamos o seu modo antigo para Interface
+            if (startOffset == -1) {
+                // ... (Sua lógica de buscar "m_WindowName" pode ficar aqui como fallback)
+                startOffset = 0; // Fallback agressivo: tenta ler do byte 0
+            }
 
             bais.reset();
             bais.skip(startOffset);
             sb.append("\ndefaultproperties\n{\n");
 
-            // 2. LOOP DE LEITURA (Protocolo 542 / UE2.5)
-            while (bais.available() > 0) {
+            // 2. LOOP DE LEITURA (Mantive sua lógica que é boa, mas adicionei proteções)
+            int safetyCounter = 0;
+            while (bais.available() > 0 && safetyCounter < 200) {
+                safetyCounter++;
                 int nameIdx = di.readCompactInt();
+                
                 if (nameIdx <= 0 || nameIdx >= up.getNameTable().size()) break;
 
                 String propName = up.getNameTable().get(nameIdx).getName();
-                if (propName.equalsIgnoreCase("None")) break;
+                if (propName.equalsIgnoreCase("None")) {
+                    sb.append("    // End of properties\n");
+                    break;
+                }
+
+                // Proteção contra lixo: se o nome não parece uma propriedade, pula
+                if (!isKnownProperty(propName, properties) && safetyCounter > 1) {
+                    continue; 
+                }
 
                 int info = di.readUnsignedByte();
                 int type = info & 0x0F;
@@ -720,31 +779,29 @@ public class UnrealDecompiler {
                 try {
                     switch (type) {
                         case 1 -> value = String.valueOf(di.readUnsignedByte()); // Byte
-                        case 2 -> value = String.valueOf(IOUtil.readInt(bais)); // Int
-                        case 3 -> value = (boolOrArray) ? "true" : "false"; // Bool
-                        case 4 -> value = String.valueOf(IOUtil.readFloat(bais)); // Float
-                        case 5, 7 -> { // ObjectProperty
+                        case 2 -> value = String.valueOf(di.readInt()); // Int
+                        case 4 -> value = String.valueOf(di.readFloat()); // Float
+                        case 5, 7 -> { // ObjectProperty (CRUCIAL PARA SHADERS)
                             int ref = di.readCompactInt();
                             var obj = up.objectReference(ref);
-                            value = (obj != null) ? obj.getObjectName().getName() : "none";
+                            value = (obj != null) ? obj.getObjectName().getName() : "None";
                         }
-                        case 6, 8 -> value = "'" + up.getNameTable().get(di.readCompactInt()).getName() + "'"; // Name
-                        case 11 -> value = "\"" + StreamsHelper.readString(bais) + "\""; // ANSI String
-                        case 13 -> { // Unicode String 
-                            value = "\"" + StreamsHelper.readString(bais) + "\"";
+                        case 6, 8 -> { // NameProperty
+                            int nIdx = di.readCompactInt();
+                            value = "'" + up.getNameTable().get(nIdx).getName() + "'";
                         }
-                        case 10 -> { // StructProperty
-                            di.readCompactInt(); // Struct Name
+                        case 11, 13 -> value = "\"" + StreamsHelper.readString(bais) + "\""; // Strings
+                        case 10 -> { // Struct
                             bais.skip(size);
-                            value = "/* struct */";
+                            value = "/* struct size " + size + " */";
                         }
                         default -> {
                             bais.skip(Math.min(size, (int)bais.available()));
-                            value = "/* type " + type + " size " + size + " */";
+                            value = "/* unsupported type " + type + " */";
                         }
                     }
                 } catch (Exception e) {
-                    value = "/* parse error */";
+                    value = "/* parse error at " + bais.available() + " */";
                 }
 
                 sb.append("    ").append(propName).append("=").append(value).append("\n");
@@ -755,6 +812,15 @@ public class UnrealDecompiler {
             return "// Error: " + e.getMessage();
         }
         return sb.toString();
+    }
+
+    // Método auxiliar para validar se o nome encontrado é realmente uma propriedade
+    private boolean isKnownProperty(String name, List<ExportEntry> properties) {
+        if (name == null || name.length() < 2) return false;
+        // Se a lista de properties estiver vazia (comum em Shaders), 
+        // aceitamos nomes que começam com letra maiúscula (padrão Unreal)
+        return Character.isUpperCase(name.charAt(0)) || 
+               properties.stream().anyMatch(p -> p.getObjectName().getName().equalsIgnoreCase(name));
     }
     
     public String getFullPropertyLine(ExportEntry p) {
@@ -837,6 +903,76 @@ public class UnrealDecompiler {
             }
         } catch (Exception e) {
             return "// Error decompiling Const: " + e.getMessage();
+        }
+    }
+    
+    /**
+     * Tenta localizar e extrair o código-fonte original (UnrealScript) de um objeto.
+     * Útil para classes, funções ou estados que possuem ScriptText associado.
+     * * @param entry O ExportEntry da classe ou função.
+     * @return O código UnrealScript ou uma mensagem de erro.
+     */
+    /**
+     * Tenta extrair um BufferedImage de um ExportEntry de textura.
+     * @param entry O objeto da tabela de exportação que queremos converter.
+     * @return BufferedImage se for sucesso, ou null se falhar.
+     */
+    public BufferedImage extractBufferedImage(ExportEntry entry) {
+        try {
+            // 1. Get the texture information (Width, Height, Format)
+            Optional<MipMapInfo> infoOpt = MipMapInfo.getInfo(entry);
+            
+            if (!infoOpt.isPresent()) {
+                return null;
+            }
+
+            MipMapInfo info = infoOpt.get();
+            byte[] rawData = entry.getObjectRawDataExternally();
+            
+            // 2. Decode based on format
+            // We handle each format explicitly to avoid type inference issues
+            switch (info.properties.getFormat()) {
+                case DXT1:
+                case DXT3:
+                case DXT5:
+                    return Img.DDS.createFromData(rawData, info).getMipMaps()[0];
+                case P8:
+                    return Img.P8.createFromData(rawData, info).getMipMaps()[0];
+                case RGBA8:
+                    return Img.TGA.createFromData(rawData, info).getMipMaps()[0];
+                default:
+                    return null;
+            }
+        } catch (Exception e) {
+            // Log error if needed: System.err.println("Error decoding texture: " + e.getMessage());
+            return null;
+        }
+    }
+    
+    public BufferedImage[] extractAllMips(ExportEntry entry) {
+        try {
+            Optional<MipMapInfo> infoOpt = MipMapInfo.getInfo(entry);
+            if (!infoOpt.isPresent()) return null;
+
+            MipMapInfo info = infoOpt.get();
+            byte[] rawData = entry.getObjectRawDataExternally();
+            
+            Img imgObj = null;
+            switch (info.properties.getFormat()) {
+                case DXT1: case DXT3: case DXT5:
+                    imgObj = Img.DDS.createFromData(rawData, info);
+                    break;
+                case P8:
+                    imgObj = Img.P8.createFromData(rawData, info);
+                    break;
+                case RGBA8:
+                    imgObj = Img.TGA.createFromData(rawData, info);
+                    break;
+            }
+            
+            return (imgObj != null) ? imgObj.getMipMaps() : null;
+        } catch (Exception e) {
+            return null;
         }
     }
 

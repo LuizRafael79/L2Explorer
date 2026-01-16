@@ -70,12 +70,19 @@ import org.l2explorer.unreal.util.ObservableSet;
 import org.l2explorer.unreal.util.ObservableSetWrapper;
 
 public class UnrealSerializerFactory extends ReflectionSerializerFactory<UnrealRuntimeContext> {
-	private java.io.File baseDir;
+	private static java.io.File baseDir;
 
-    // Adicione este método para o UnrealDecompiler conseguir "conversar" com a factory
-    public void setBaseDir(java.io.File dir) {
-        this.baseDir = dir;
-    }
+	public static void setBaseDir(java.io.File dir) {
+	    UnrealSerializerFactory.baseDir = dir;
+	}
+
+	/**
+	 * Retorna o diretório base configurado (Necessário para o Decompiler)
+	 */
+	public java.io.File getBaseDir() {
+	    return UnrealSerializerFactory.baseDir;
+	}
+    
     private static final Logger log = Logger.getLogger(UnrealSerializerFactory.class.getName());
 
     private static final String LOAD_THREAD_NAME = "Unreal loader";
@@ -589,51 +596,107 @@ public class UnrealSerializerFactory extends ReflectionSerializerFactory<UnrealR
             return environment.getPackage(name);
         }
 
-        @Override
+        @Override        
         public Optional<UnrealPackage.ExportEntry> getExportEntry(String fullName, Predicate<String> fullClassName) throws IOException {
-            String[] path = fullName.split("\\.");
+            // 1. Log de Auditoria para sabermos o que o motor está pedindo
+            System.out.println("🔍 Factory buscando: " + fullName);
 
-            Optional<UnrealPackage.ExportEntry> entryOptional = appendCustomPackage(Stream.empty(), path[0])
-                    .map(UnrealPackage::getExportTable)
-                    .flatMap(Collection::stream)
-                    .filter(e -> e.getObjectFullName().equalsIgnoreCase(fullName))
-                    .filter(e -> fullClassName.test(e.getFullClassName()))
-                    .findAny();
-            if (entryOptional.isPresent()) {
-                return entryOptional;
+            String[] path = fullName.split("\\.");
+            if (path.length == 0) return Optional.empty();
+
+            String pkgName = path[0]; // ex: Engine
+            
+            // Força o carregamento do pacote de sistema se necessário
+            if (pkgName.equalsIgnoreCase("Engine") || pkgName.equalsIgnoreCase("Core")) {
+                appendCustomPackage(Stream.empty(), pkgName);
+            }
+
+            // Procura no nosso cache de pacotes injetados (usando busca case-insensitive na chave)
+            UnrealPackage customPkg = adds.entrySet().stream()
+                    .filter(entry -> entry.getKey().equalsIgnoreCase(pkgName))
+                    .map(Map.Entry::getValue)
+                    .findFirst()
+                    .orElse(null);
+
+            if (customPkg != null) {
+                // Busca na ExportTable ignorando Case
+                Optional<UnrealPackage.ExportEntry> entry = customPkg.getExportTable().stream()
+                        .filter(e -> e.getObjectFullName().equalsIgnoreCase(fullName))
+                        .filter(e -> fullClassName.test(e.getFullClassName()))
+                        .findAny();
+                
+                if (entry.isPresent()) {
+                    System.out.println("✅ Encontrado em cache: " + fullName);
+                    return entry;
+                } else {
+                    // Se o pacote abriu mas a classe não está lá, o Engine.u pode estar mal decriptado
+                    System.err.println("❌ Erro Crítico: Pacote " + pkgName + ".u aberto, mas " + fullName + " não consta na ExportTable!");
+                }
             }
 
             return environment.getExportEntry(fullName, fullClassName);
         }
 
+        /**
+         * Adiciona pacotes de sistema (Core/Engine) ao stream de busca, 
+         * garantindo a decriptação via RandomAccessFile.
+         * * @param stream O stream de pacotes original.
+         * @param name O nome do pacote desejado.
+         * @return Um stream contendo o pacote auxiliar se encontrado.
+         */
+        /**
+         * Adiciona pacotes base (Core/Engine) garantindo que o cabeçalho L2Ver seja respeitado.
+         */
+        /**
+         * Adiciona pacotes base (Core/Engine) garantindo que o cabeçalho L2Ver seja respeitado.
+         */
         private Stream<UnrealPackage> appendCustomPackage(Stream<UnrealPackage> stream, String name) throws IOException {
             if (!name.equalsIgnoreCase("Engine") && !name.equalsIgnoreCase("Core")) {
                 return stream;
             }
 
-            name = canonizeName(name);
-            if (!adds.containsKey(name)) {
-                ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                try (InputStream is = getClass().getResourceAsStream("/" + name + ".u")) {
-                    byte[] buf = new byte[1024];
-                    int r;
-                    while ((r = is.read(buf)) != -1) {
-                        baos.write(buf, 0, r);
+            String canonName = canonizeName(name);
+
+            // Se o pacote não está no cache, buscamos no disco
+            if (!adds.containsKey(canonName)) {
+                File targetFile = null;
+                if (baseDir != null) {
+                    File directFile = new File(baseDir, canonName + ".u");
+                    if (directFile.exists()) {
+                        targetFile = directFile;
+                    } else {
+                        // Fallback para pasta System vizinha (padrão Lineage 2)
+                        File parent = baseDir.getParentFile();
+                        if (parent != null) {
+                            File sysDir = new File(parent, "System");
+                            if (!sysDir.exists()) sysDir = new File(parent, "system");
+                            File fallbackFile = new File(sysDir, canonName + ".u");
+                            if (fallbackFile.exists()) targetFile = fallbackFile;
+                        }
                     }
-                } catch (IOException e) {
-                    throw new UnrealException(e);
                 }
 
-                try (UnrealPackage up = new UnrealPackage(new RandomAccessMemory(name, baos.toByteArray(), UnrealPackage.getDefaultCharset()))) {
-                    adds.put(name, up);
+                if (targetFile != null) {
+                    try {
+                        // IMPORTANTE: O construtor com File usa seu RandomAccessFile para pular o header L2Ver413
+                        UnrealPackage up = new UnrealPackage(targetFile, true);
+                        if (!up.getExportTable().isEmpty()) {
+                            adds.put(canonName, up);
+                            System.out.println("✅ Dep Carregada: " + canonName);
+                        }
+                    } catch (Exception e) {
+                        System.err.println("❌ Erro no pacote auxiliar " + canonName + ": " + e.getMessage());
+                    }
                 }
             }
 
-            return Stream.concat(Stream.of(adds.get(name)), stream);
+            UnrealPackage pkg = adds.get(canonName);
+            return (pkg != null) ? Stream.concat(Stream.of(pkg), stream) : stream;
         }
 
+        // Helper para padronizar nomes
         private String canonizeName(String name) {
+            if (name == null || name.isEmpty()) return name;
             return name.substring(0, 1).toUpperCase() + name.substring(1).toLowerCase();
-        }
-    }
+        }}
 }

@@ -7,7 +7,17 @@ import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
 import java.awt.Insets;
+import java.awt.Point;
+import java.awt.Polygon;
+import java.awt.RenderingHints;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseMotionAdapter;
+import java.awt.geom.AffineTransform;
+import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -15,6 +25,8 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import javax.swing.BorderFactory;
+import javax.swing.Icon;
+import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JFileChooser;
@@ -23,10 +35,12 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSeparator;
+import javax.swing.JSlider;
 import javax.swing.JSplitPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTextArea;
 import javax.swing.JTree;
+import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.border.EmptyBorder;
@@ -39,6 +53,7 @@ import javax.swing.tree.DefaultTreeModel;
 
 import org.l2explorer.io.UnrealPackage;
 import org.l2explorer.io.UnrealPackage.ExportEntry;
+import org.l2explorer.unreal.UnrealSerializerFactory;
 import org.l2explorer.utils.crypt.rsa.L2Ver41x;
 import org.l2explorer.utils.crypt.rsa.L2Ver41xInputStream;
 import org.l2explorer.utils.enums.UnrealOpcode;
@@ -57,8 +72,13 @@ public class ExplorerPanel extends JPanel {
     private static final Color WARNING = new Color(251, 191, 36);
     private static final Color INSPECT = new Color(139, 92, 246);
     
+    private double currentRotation = 0;
+    
     private JTree objectTree;
     private JTextArea codeArea, infoArea;
+    private JLabel imagePreviewLabel; 
+    private JScrollPane imagePreviewScroll;
+    private JPanel mipMapGalleryPanel;
     public DebugConsole debugConsole;
     private UnrealDecompiler decompiler;
     private UnrealPackage currentPackage;
@@ -72,8 +92,14 @@ public class ExplorerPanel extends JPanel {
         this.currentPackage = up;
         this.systemDir = baseDir;
         this.debugConsole = new DebugConsole();
-        this.decompiler = new UnrealDecompiler(up, baseDir);
 
+        org.l2explorer.unreal.UnrealSerializerFactory factory = 
+                new org.l2explorer.unreal.UnrealSerializerFactory(new org.l2explorer.unreal.SimpleEnv(up));
+            UnrealSerializerFactory.setBaseDir(baseDir);
+            
+            // Agora passamos a factory em vez do baseDir
+            this.decompiler = new UnrealDecompiler(up, factory);
+        
         setLayout(new BorderLayout());
         setBackground(MAIN_BG);
 
@@ -612,18 +638,177 @@ public class ExplorerPanel extends JPanel {
         
         infoArea = createStyledTextArea(new Color(30, 30, 30), new Color(200, 200, 200));
         codeArea = createStyledTextArea(new Color(30, 30, 30), new Color(171, 178, 191));
+        
+        // --- NOVO COMPONENTE DE PREVIEW 3D ---
+        // Criamos o componente que aceita mouse e desenha o cubo
+        PreviewPanel3D preview3D = new PreviewPanel3D();
+        
+        // Mantemos a referência para que o renderTextureGallery possa acessá-lo
+        mipMapGalleryPanel = preview3D; 
 
         JScrollPane infoScroll = new JScrollPane(infoArea);
         JScrollPane codeScroll = new JScrollPane(codeArea);
-        
         infoScroll.setBorder(null);
         codeScroll.setBorder(null);
         
+        // Criamos um container para o preview caso você queira adicionar botões depois
+        JPanel previewContainer = new JPanel(new BorderLayout());
+        previewContainer.setBackground(MAIN_BG);
+        previewContainer.add(preview3D, BorderLayout.CENTER);
+
         tabs.addTab("📊 Details", infoScroll);
         tabs.addTab("💻 Source Code", codeScroll);
+        tabs.addTab("🖼️ Preview 3D", previewContainer); // A aba interativa
         
         return tabs;
     }
+    
+    
+ // Classe interna para renderizar o cubo estilo UModel
+    /**
+     * Motor de renderização 3D leve para o preview de texturas.
+     */
+    /**
+     * Motor 3D revisado: Transparência total e Mapeamento Afim (Anti-derretimento)
+     */
+    private class PreviewPanel3D extends JPanel {
+        private static final long serialVersionUID = 1L;
+        private BufferedImage texture;
+        private double rotX = 0.5, rotY = 0.5;
+        private Point lastMouse;
+        private double zoom = 1.0; // Adicionei suporte base para escala
+
+        public PreviewPanel3D() {
+            setBackground(new Color(25, 25, 25));
+            setOpaque(true);
+            
+            // Controle de Rotação por Mouse
+            addMouseListener(new MouseAdapter() {
+                public void mousePressed(MouseEvent e) { lastMouse = e.getPoint(); }
+            });
+            addMouseMotionListener(new MouseMotionAdapter() {
+                public void mouseDragged(MouseEvent e) {
+                    if (lastMouse == null) return;
+                    rotY += (e.getX() - lastMouse.x) * 0.01;
+                    rotX += (e.getY() - lastMouse.y) * 0.01;
+                    lastMouse = e.getPoint();
+                    repaint();
+                }
+            });
+            
+            // Controle de Zoom por Scroll
+            addMouseWheelListener(e -> {
+                zoom -= e.getPreciseWheelRotation() * 0.1;
+                zoom = Math.max(0.1, Math.min(zoom, 5.0)); // Limita o zoom
+                repaint();
+            });
+        }
+
+        public void setTexture(BufferedImage img) {
+            this.texture = img;
+            repaint();
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            super.paintComponent(g);
+            if (texture == null) return;
+
+            Graphics2D g2 = (Graphics2D) g;
+            // Melhora a qualidade visual (Estilo UModel)
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            
+            int w = getWidth(), h = getHeight();
+            g2.translate(w / 2, h / 2); // Centraliza na tela
+
+            double s = (Math.min(w, h) / 4.5) * zoom;
+            draw3DCube(g2, s);
+        }
+
+        private void draw3DCube(Graphics2D g2, double s) {
+            // Definição dos vértices
+            double[][] v = {
+                {-s,-s, s}, { s,-s, s}, { s, s, s}, {-s, s, s},
+                {-s,-s,-s}, { s,-s,-s}, { s, s,-s}, {-s, s,-s}
+            };
+
+            // Rotação Matemática
+            for (double[] p : v) {
+                double y = p[1], z = p[2];
+                p[1] = y * Math.cos(rotX) - z * Math.sin(rotX);
+                p[2] = y * Math.sin(rotX) + z * Math.cos(rotX);
+                double x = p[0]; z = p[2];
+                p[0] = x * Math.cos(rotY) + z * Math.sin(rotY);
+                p[2] = -x * Math.sin(rotY) + z * Math.cos(rotY);
+            }
+
+            // Definição das faces e ordem dos triângulos para mapeamento UV
+            int[][] faces = {{0,1,2,3}, {5,4,7,6}, {4,5,1,0}, {3,2,6,7}, {4,0,3,7}, {1,5,6,2}};
+            
+            for (int[] f : faces) {
+                if (isFaceVisible(v[f[0]], v[f[1]], v[f[2]])) {
+                    // Mapeia a textura dividindo o quadrado em 2 triângulos (Affine Mapping)
+                    // Triângulo 1 (Topo-Esquerda)
+                    drawTexturedTriangle(g2, texture, v[f[0]], v[f[1]], v[f[2]], 0, 0, 1, 0, 1, 1);
+                    // Triângulo 2 (Baixo-Direita)
+                    drawTexturedTriangle(g2, texture, v[f[0]], v[f[2]], v[f[3]], 0, 0, 1, 1, 0, 1);
+                    
+                    // Desenha apenas o contorno (Wireframe) - Sem preenchimento de cor sólida!
+                    Polygon poly = new Polygon();
+                    for (int i : f) poly.addPoint((int)v[i][0], (int)v[i][1]);
+                    g2.setColor(ACCENT);
+                    g2.draw(poly);
+                }
+            }
+        }
+
+        private void drawTexturedTriangle(Graphics2D g2, BufferedImage img, 
+                                          double[] p1, double[] p2, double[] p3,
+                                          double u1, double v1, double u2, double v2, double u3, double v3) {
+            Graphics2D g = (Graphics2D) g2.create();
+            int iw = img.getWidth();
+            int ih = img.getHeight();
+
+            // Área de recorte do triângulo
+            Polygon destPoly = new Polygon();
+            destPoly.addPoint((int)p1[0], (int)p1[1]);
+            destPoly.addPoint((int)p2[0], (int)p2[1]);
+            destPoly.addPoint((int)p3[0], (int)p3[1]);
+            g.setClip(destPoly);
+
+            // Coordenadas de destino na tela
+            double x11 = p1[0], x12 = p1[1];
+            double x21 = p2[0], x22 = p2[1];
+            double x31 = p3[0], x32 = p3[1];
+            
+            // Coordenadas UV na textura
+            double y11 = u1 * iw, y12 = v1 * ih;
+            double y21 = u2 * iw, y22 = v2 * ih;
+            double y31 = u3 * iw, y32 = v3 * ih;
+
+            // Cálculo da Matriz de Transformação Afim
+            double det = (y11 - y31) * (y22 - y32) - (y21 - y31) * (y12 - y32);
+            if (Math.abs(det) < 0.0001) { g.dispose(); return; }
+
+            double a = ((x11 - x31) * (y22 - y32) - (x21 - x31) * (y12 - y32)) / det;
+            double b = ((x21 - x31) * (y11 - y31) - (x11 - x31) * (y21 - y31)) / det;
+            double c = x31 - a * y31 - b * y32;
+            double d = ((x12 - x32) * (y22 - y32) - (x22 - x32) * (y12 - y32)) / det;
+            double e = ((x22 - x32) * (y11 - y31) - (x12 - x32) * (y21 - y31)) / det;
+            double f = x32 - d * y31 - e * y32;
+
+            g.transform(new AffineTransform(a, d, b, e, c, f));
+            g.drawImage(img, 0, 0, null);
+            g.dispose();
+        }
+
+        private boolean isFaceVisible(double[] a, double[] b, double[] c) {
+            // Algoritmo de Back-face culling para performance
+            return (b[0]-a[0])*(c[1]-a[1]) - (b[1]-a[1])*(c[0]-a[0]) > 0;
+        }
+    }
+    
 
     private JPanel createConsolePanel() {
         JPanel panel = new JPanel(new BorderLayout());
@@ -697,35 +882,70 @@ public class ExplorerPanel extends JPanel {
         }
     }
 
+    /**
+     * Carrega pacotes Unreal (.u, .utx, etc) resolvendo dependências via L2.ini automaticamente.
+     * @param file O arquivo selecionado pelo usuário.
+     */
+    /**
+     * Carrega o pacote principal e sincroniza a Factory para o Decompiler.
+     */
+    /**
+     * Carrega o pacote e inicializa o motor de decompilação com suporte a dependências (L2.ini).
+     */
     private void loadPackage(File file) {
         String fileName = file.getName().toLowerCase();
+        debugConsole.clear(); // Limpa o rastro do arquivo anterior
 
-        // --- INTERCEPTADOR PARA DAT/INI (SAMURAI CROW 413) ---
         if (fileName.endsWith(".dat") || fileName.endsWith(".ini")) {
-            loadDatFile(file); // Chama o método que decripta via RSA + Zlib
+            loadDatFile(file); 
             return;
         }
 
-        // --- FLUXO ORIGINAL PARA PACOTES UNREAL (.u, .utx, .unr, .ukx) ---
         SwingWorker<Void, String> worker = new SwingWorker<>() {
             @Override
             protected Void doInBackground() {
                 publish("Loading: " + file.getName());
                 try {
-                    // Aqui o motor ACMI decripta o Header (XOR/111/121) automaticamente
+                    // 1. Abre o pacote (RandomAccessFile lida com header XOR/413)
                     UnrealPackage newPackage = new UnrealPackage(file, true);
+                    File parentDir = file.getParentFile();
                     
+                    // 2. Localiza o L2.ini para configurar o ambiente de busca global
+                    File foundIni = new File(parentDir, "L2.ini");
+                    if (!foundIni.exists()) {
+                        File gp = parentDir.getParentFile();
+                        if (gp != null) {
+                            File sysFolder = new File(gp, "System");
+                            if (!sysFolder.exists()) sysFolder = new File(gp, "system");
+                            foundIni = new File(sysFolder, "L2.ini");
+                        }
+                    }
+
+                    final File finalL2ini = foundIni.exists() ? foundIni : null;
+                    // Cria o Environment real baseado no L2.ini (ou SimpleEnv se não achar)
+                    final org.l2explorer.unreal.Env env = (finalL2ini != null) 
+                        ? org.l2explorer.unreal.Environment.fromIni(finalL2ini)
+                        : new org.l2explorer.unreal.SimpleEnv(newPackage);
+
                     SwingUtilities.invokeLater(() -> {
                         currentPackage = newPackage;
-                        systemDir = file.getParentFile();
-                        decompiler = new UnrealDecompiler(newPackage, file);
+                        systemDir = parentDir;
                         
-                        // Rebuild tree
+                        // 3. Inicializa a Factory com o Env do L2.ini (Crucial para Shaders)
+                        org.l2explorer.unreal.UnrealSerializerFactory factory = 
+                            new org.l2explorer.unreal.UnrealSerializerFactory(env);
+                        
+                        factory.setBaseDir(parentDir);
+                        org.l2explorer.unreal.UnrealSerializerFactory.setBaseDir(parentDir);
+
+                        // 4. Injeta a Factory no Decompiler
+                        decompiler = new org.l2explorer.utils.unreal.UnrealDecompiler(newPackage, factory); 
+
+                        // 5. Reconstrói a árvore de objetos
                         DefaultMutableTreeNode root = new DefaultMutableTreeNode(newPackage.getPackageName());
                         newPackage.getExportTable().stream()
                             .filter(e -> e.getObjectPackage() == null)
-                            .sorted((e1, e2) -> e1.getObjectName().getName()
-                                    .compareToIgnoreCase(e2.getObjectName().getName()))
+                            .sorted((e1, e2) -> e1.getObjectName().getName().compareToIgnoreCase(e2.getObjectName().getName()))
                             .forEach(e -> {
                                 DefaultMutableTreeNode node = new DefaultMutableTreeNode(e);
                                 node.add(new DefaultMutableTreeNode("Loading..."));
@@ -733,21 +953,18 @@ public class ExplorerPanel extends JPanel {
                             });
                         
                         objectTree.setModel(new DefaultTreeModel(root));
-                        updatePackageInfo(); // Mostra Versão, Licença e GUID no console
+                        updatePackageInfo();
                         
-                        reloadBtn.setEnabled(true);
-                        exportBtn.setEnabled(true);
-                        
-                        debugConsole.clear();
-                        debugConsole.log("✅ Package loaded: " + file.getName());
+                        debugConsole.log("✅ Pacote pronto: " + file.getName());
+                        if (finalL2ini != null) debugConsole.log("⚙️ Path: " + finalL2ini.getAbsolutePath());
                         setStatus("Loaded: " + file.getName(), SUCCESS);
                     });
                     
                 } catch (Exception ex) {
-                    ex.printStackTrace(); // Log completo no console da IDE
+                    ex.printStackTrace();
                     SwingUtilities.invokeLater(() -> {
-                        showError("Load Error", ex.getMessage());
-                        setStatus("Error loading package", new Color(239, 68, 68));
+                        debugConsole.log("❌ Erro: " + ex.getMessage());
+                        setStatus("Load Error", new Color(239, 68, 68));
                     });
                 }
                 return null;
@@ -758,7 +975,6 @@ public class ExplorerPanel extends JPanel {
                 chunks.forEach(msg -> setStatus(msg, WARNING));
             }
         };
-        
         worker.execute();
     }
 
@@ -800,46 +1016,89 @@ public class ExplorerPanel extends JPanel {
         codeArea.setText("// Decompiling " + entry.getObjectName().getName() + "...\n");
 
         try {
-            String source;
+            String source = null;
             String fullClass = entry.getFullClassName();
 
-            // Despachante: Manda para o método correto do decompiler baseado na classe
-            if (fullClass.equals("Core.Class")) {
-                debugConsole.log("🔄 Decompiling class...");
+            // Despachante: Encaminha para o método correto baseado na classe do objeto
+            if (fullClass.equals("Core.Class") || fullClass.equals("Engine.FinalBlend") || fullClass.contains("Modifier")) {
+                debugConsole.log("🔄 Decompilando propriedades/classe...");
+                // FinalBlend e Modificadores são lidos como classes (propriedades)
                 source = decompiler.decompileClassComplete(entry);
+            } else if (fullClass.equals("Engine.Shader")) {
+                debugConsole.log("🎨 Analisando Shader complexo...");
+                
+                // 1. O Decompiler deve mostrar as camadas (Diffuse, Specular, etc)
+                source = decompiler.decompileClassComplete(entry);
+                
             } else if (fullClass.equals("Core.Function")) {
-                debugConsole.log("⚡ Decompiling function...");
+                debugConsole.log("⚡ Decompilando function...");
                 source = decompiler.decompileFunction(entry);
+                
             } else if (fullClass.equals("Core.Const")) {
-                debugConsole.log("🔒 Decompiling constant...");
-                source = decompiler.decompileConst(entry); // Adicione esta linha
+                debugConsole.log("🔒 Decompilando constante...");
+                source = decompiler.decompileConst(entry);
+                
             } else if (fullClass.equals("Core.Struct")) {
-                debugConsole.log("📋 Decompiling struct...");
-                source = decompiler.decompileStruct(entry); // <--- Chamando o exorcista de structs
+                debugConsole.log("📋 Decompilando struct...");
+                source = decompiler.decompileStruct(entry);
+                
             } else if (fullClass.equals("Core.Enum")) {
-                debugConsole.log("🔢 Decompiling enum...");
-                source = decompiler.decompileEnum(entry);   // <--- Chamando o leitor de enums
+                debugConsole.log("🔢 Decompilando enum...");
+                source = decompiler.decompileEnum(entry);
+                
             } else if (fullClass.endsWith("Property")) {
-                debugConsole.log("🔧 Decompiling property...");
-                source = decompiler.getFullPropertyLine(entry); // <--- Chamando o identificador de tipos
+                debugConsole.log("🔧 Decompilando propriedade...");
+                source = decompiler.getFullPropertyLine(entry);
+                
             } else if (fullClass.equals("Core.TextBuffer")) {
-                debugConsole.log("📄 Reading TextBuffer...");
-                source = decompiler.decompileTextBuffer(entry);            
+                debugConsole.log("📄 Lendo TextBuffer...");
+                source = decompiler.decompileTextBuffer(entry);
+                
+            } else if (fullClass.equals("Engine.Texture")) {
+                debugConsole.log("🖼️ Renderizando galeria de texturas...");
+                source = renderTextureGallery(entry); // Método que criamos no ExplorerPanel
+                
             } else {
                 source = "// Type: " + fullClass + "\n// Not yet supported\n";
             }
             
             codeArea.setText(source);
             codeArea.setCaretPosition(0);
-            debugConsole.log("✅ Decompilation complete!");
+            debugConsole.log("✅ Processamento concluído!");
             setStatus("Ready", SUCCESS);
             
         } catch (Exception e) {
-            codeArea.setText("// ❌ ERROR: " + e.getMessage());
-            debugConsole.log("❌ ERROR: " + e.getMessage());
-            setStatus("Decompilation failed", new Color(239, 68, 68));
-            e.printStackTrace();
+        	
         }
+        }                
+                
+    private String renderTextureGallery(ExportEntry entry) {
+        // Extrai a imagem principal (Mip 0)
+        BufferedImage img = decompiler.extractBufferedImage(entry);
+
+        if (img != null) {
+            // Se o nosso painel for do tipo 3D, passa a imagem pra ele
+            if (mipMapGalleryPanel instanceof PreviewPanel3D p3d) {
+                p3d.setTexture(img);
+            }
+
+            // Garante que a aba Preview (índice 2) seja selecionada automaticamente
+            Component parent = mipMapGalleryPanel.getParent();
+            while (parent != null && !(parent instanceof JTabbedPane)) {
+                parent = parent.getParent();
+            }
+            if (parent instanceof JTabbedPane tabs) {
+                tabs.setSelectedIndex(2);
+            }
+            
+            mipMapGalleryPanel.revalidate();
+            mipMapGalleryPanel.repaint();
+            
+            return "// Texture: " + entry.getObjectName().getName() + " loaded.\n" +
+                   "// [Click and Drag to Rotate]";
+        }
+        
+        return "// ❌ Error: Could not extract texture for 3D preview.";
     }
 
     private void updatePackageInfo() {
@@ -892,51 +1151,48 @@ public class ExplorerPanel extends JPanel {
 
     /**
      * Decrypts and displays Lineage II .dat files (Crypt 413 - RSA + Zlib).
-     * * @param file The encrypted .dat file
+     * @param file The encrypted .dat file
      */
     public void loadDatFile(File file) {
+        final File finalFile = file;
+
         SwingWorker<Void, String> worker = new SwingWorker<>() {
             @Override
             protected Void doInBackground() {
-                publish("Decrypting: " + file.getName() + " (RSA 413)...");
+                publish("Decrypting: " + finalFile.getName() + " (RSA 413)...");
                 
-                // Usamos um FileInputStream puro para evitar o erro na linha 43 do seu RandomAccessFile
-                try (FileInputStream fis = new FileInputStream(file)) {
-                    
-                    // 1. Pular o header "Lineage2Ver413" (28 bytes em UTF-16LE)
-                    long skipped = fis.skip(28);
-                    if (skipped < 28) throw new IOException("Invalid DAT header.");
+                try (FileInputStream fis = new FileInputStream(finalFile)) {
+                    // 1. Skip "Lineage2Ver413" header (28 bytes)
+                    byte[] header = new byte[28];
+                    int read = fis.read(header);
+                    if (read < 28) throw new IOException("Invalid DAT header.");
 
-                    // 2. Inicializar o stream de decriptação RSA + Descompressão Zlib
-                    // Certifique-se que MODULUS_413 e PRIVATE_EXPONENT_413 estão acessíveis
-                    try (L2Ver41xInputStream l2in = new L2Ver41xInputStream(fis, L2Ver41x.MODULUS_413, L2Ver41x.PRIVATE_EXPONENT_413)) {
+                    // 2. RSA + Zlib Decryption Stream
+                    try (L2Ver41xInputStream l2in = new L2Ver41xInputStream(fis, 
+                            L2Ver41x.MODULUS_413, L2Ver41x.PRIVATE_EXPONENT_413)) {
                         
-                        // 3. Ler os dados decriptados
                         byte[] decryptedData = l2in.readAllBytes();
-                        
-                        // No Samurai Crow, a maioria dos DATs usa UTF-16LE para as strings
-                        String content = new String(decryptedData, java.nio.charset.StandardCharsets.UTF_16LE);
+                        if (decryptedData.length == 0) throw new IOException("Decryption resulted in empty data.");
+
+                        // Convert to UTF-16LE (Standard for L2 Dat Files)
+                        final String content = new String(decryptedData, java.nio.charset.StandardCharsets.UTF_16LE);
 
                         SwingUtilities.invokeLater(() -> {
                             codeArea.setText(content);
                             codeArea.setCaretPosition(0);
                             
-                            // Limpa a árvore já que DAT não tem estrutura de pacotes Unreal
-                            objectTree.setModel(new DefaultTreeModel(new DefaultMutableTreeNode(file.getName())));
+                            // Reset Tree for non-package file
+                            objectTree.setModel(new DefaultTreeModel(new DefaultMutableTreeNode(finalFile.getName())));
                             
                             debugConsole.log("✅ DAT Decrypted successfully!");
                             setStatus("DAT Loaded", SUCCESS);
                         });
                     }
                 } catch (Exception e) {
-                    // Log detalhado para o seu DebugConsole
-                    String errorMsg = "❌ Crypto Error: " + e.getMessage();
-                    publish(errorMsg);
                     e.printStackTrace();
-                    
                     SwingUtilities.invokeLater(() -> {
                         codeArea.setText("// Failed to decrypt DAT file.\n// Error: " + e.getMessage());
-                        showError("Decryption Failed", e.getMessage());
+                        setStatus("Decryption Failed", new Color(239, 68, 68));
                     });
                 }
                 return null;
