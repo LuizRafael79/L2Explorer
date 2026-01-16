@@ -4,7 +4,7 @@ import java.io.*;
 import java.util.Properties;
 
 public class GeneralConfig {
-    private static final String CONFIG_FILE = "l2explorer.properties";
+    private static final String CONFIG_FILE = "l2explorer.ini";
     private static final Properties props = new Properties();
 
     static {

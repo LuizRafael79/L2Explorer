@@ -39,6 +39,11 @@ public class RandomAccessFile implements RandomAccess {
                     int xb = getCryptKey(f.getName());
                     xorKey = xb | (xb << 8) | (xb << 16) | (xb << 24);
                     break;
+                case 412:    
+                case 413:
+                    // Não jogamos erro, mas avisamos que não é XOR
+                    xorKey = 0; 
+                    break;
                 default:
                     throw new IOException("Crypt " + cryptVer + " is not supported.");
             }

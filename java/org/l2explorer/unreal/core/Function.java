@@ -55,7 +55,7 @@ public class Function extends Struct {
     private int replicationOffset;
 
     @Bytecode
-    private Token[] bytecode;
+	public Token[] bytecode;
     
     public Token[] getBytecode() {
         return bytecode;

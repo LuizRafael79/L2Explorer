@@ -28,8 +28,18 @@ public class UnrealObjectInput<C extends Context> implements ObjectInput<C> {
         Serializer<T, C> serializer = (Serializer<T, C>) serializerFactory.forClass(clazz);
         T instance = serializer.instantiate(this); // Lê o opcode e cria a classe certa
         serializer.readObject(instance, this);     // Popula os dados
+
+        System.out.println(">>> readObject: " + clazz.getSimpleName());
+        System.out.println("    Serializer: " + serializer.getClass().getSimpleName());
+            
+        System.out.println("    Instance: " + instance.getClass().getSimpleName());
+           
+        serializer.readObject(instance, this);
+        System.out.println("    ✅ Serialized!");
+          
         return instance;
     }
+        
     public L2DataInput getDataInput() {
         return dataInput;
     }
@@ -48,7 +58,7 @@ public class UnrealObjectInput<C extends Context> implements ObjectInput<C> {
             return 0;
         }
     }
-
+   
     // --- DELEGATE PARA DATAINPUT ---
     @Override public void readFully(byte[] b) throws IOException { dataInput.readFully(b); }
     @Override public void readFully(byte[] b, int off, int len) throws IOException { dataInput.readFully(b, off, len); }

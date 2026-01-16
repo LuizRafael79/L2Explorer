@@ -171,47 +171,50 @@ public class TokenSerializerFactory extends ReflectionSerializerFactory<Bytecode
 
     private Token instantiate(ObjectInput<BytecodeContext> input) throws IOException {
         int opcode = input.readUnsignedByte();
-        
         BytecodeContext ctx = input.getContext();
-        boolean isConversion = ctx.isConversion();
 
-        Class<? extends Token> tokenClass = isConversion ? 
-            conversionTokenTable.get(opcode) : mainTokenTable.get(opcode);
+        Class<? extends Token> tokenClass = null;
 
-        if (tokenClass == null && !isConversion && opcode >= EX_ExtendedNative) {
+        // 1. Primeiro tenta a tabela apropriada baseada no contexto
+        if (ctx.isConversion()) {
+            tokenClass = conversionTokenTable.get(opcode);
+            if (tokenClass == null) {
+                tokenClass = mainTokenTable.get(opcode);
+                ctx.changeConversion();
+            }
+        } else {
+            tokenClass = mainTokenTable.get(opcode);
+            
+            // 2. FALLBACK: Se não achou na Main, tenta Conversion
+            // Necessário porque L2 Essence Protocol 542 usa tokens de conversão
+            // DIRETAMENTE sem o wrapper ConversionTable (0x39)
+            if (tokenClass == null) {
+                tokenClass = conversionTokenTable.get(opcode);
+            }
+        }
+
+        // 3. Tratamento de Native Calls
+        if (tokenClass == null && opcode >= EX_ExtendedNative) {
             return readNativeCall(input, opcode);
         }
 
         if (tokenClass == null) {
-            // ===== LOG COMPLETO =====
-            System.out.println(">>> ERROR: Token 0x" + String.format("%02X", opcode) + 
-                              " not found in " + (isConversion ? "Conversion" : "Main") + " table");
-            System.out.println(">>> isConversion state: " + isConversion);
-            System.out.println(">>> Context hash: " + System.identityHashCode(ctx));
-            System.out.println(">>> Main table has: " + mainTokenTable.keySet());
-            System.out.println(">>> Conversion table has: " + conversionTokenTable.keySet());
-            // ===== FIM LOG =====
-            
-            throw new IOException(String.format("Unknown token: %02x, table: %s", 
-                opcode, isConversion ? "Conversion" : "Main"));
+            throw new IOException(String.format("Unknown token: %02x", opcode));
         }
 
         try {
             Token token = tokenClass.getDeclaredConstructor().newInstance();
 
-            if (opcode == 0x39) {
-                System.out.println(">>> Found ConversionTable (0x39), switching to Conversion mode");
+            // 4. Gerenciamento de Estado (mantido para compatibilidade)
+            if (token instanceof ConversionTable) {
                 ctx.changeConversion();
-            } 
-            else if (isConversion) {
-                System.out.println(">>> Was in Conversion mode, switching back to Main");
+            } else if (ctx.isConversion()) {
                 ctx.changeConversion();
             }
 
             return token;
-
         } catch (Exception e) {
-            throw new SerializerException("Falha ao instanciar token 0x" + Integer.toHexString(opcode), e);
+            throw new SerializerException("Failed to instantiate token 0x" + Integer.toHexString(opcode), e);
         }
     }
 

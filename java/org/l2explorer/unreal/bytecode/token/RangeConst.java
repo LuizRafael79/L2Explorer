@@ -22,7 +22,7 @@ public class RangeConst extends Token {
     /**
      * The bytecode opcode for Struct inequality comparison.
      */
-    public static final int OPCODE = 0x34;
+    public static final int OPCODE = 0x35;
 
     /**
      * Reference to the Struct object defining the layout.

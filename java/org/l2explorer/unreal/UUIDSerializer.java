@@ -25,7 +25,6 @@ import static org.l2explorer.io.ByteUtil.uuidFromBytes;
 import static org.l2explorer.io.ByteUtil.uuidToBytes;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.UUID;
 
 import org.l2explorer.io.Context;
@@ -35,18 +34,18 @@ import org.l2explorer.io.Serializer;
 
 public class UUIDSerializer implements Serializer<UUID, Context> {
     @Override
-    public UUID instantiate(ObjectInput<Context> input) throws UncheckedIOException, IOException {
+    public UUID instantiate(ObjectInput<Context> input) throws IOException {
         byte[] uuid = new byte[16];
         input.readFully(uuid);
         return uuidFromBytes(uuid);
     }
 
     @Override
-    public <S extends UUID> void readObject(S obj, ObjectInput<Context> input) throws UncheckedIOException {
+    public <S extends UUID> void readObject(S obj, ObjectInput<Context> input) throws IOException {
     }
 
     @Override
-    public <S extends UUID> void writeObject(S obj, ObjectOutput<Context> output) throws UncheckedIOException, IOException {
+    public <S extends UUID> void writeObject(S obj, ObjectOutput<Context> output) throws IOException {
         output.writeBytes(uuidToBytes(obj));
     }
 }

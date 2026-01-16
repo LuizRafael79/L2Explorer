@@ -21,6 +21,7 @@
  */
 package org.l2explorer.io;
 
+import java.awt.Color;
 import java.io.File;
 import java.io.IOException;
 import java.io.IOException;
@@ -35,6 +36,10 @@ import java.util.*;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+
+import javax.swing.JTextArea;
+import javax.swing.text.DefaultHighlighter;
+import javax.swing.text.Highlighter;
 
 import static org.l2explorer.io.ByteUtil.*;
 import static org.l2explorer.io.UnrealPackage.ObjectFlag.*;
@@ -1451,6 +1456,39 @@ public class UnrealPackage implements AutoCloseable {
                 v |= flag.getMask();
             }
             return v;
+        }
+    }
+    
+    /**
+     * Reads the raw binary data of a specific export entry.
+     * Essential for debugging new protection methods in Samurai Crow.
+     *
+     * @param entry The ExportEntry to read from.
+     * @return Byte array containing the raw object data.
+     * @throws IOException If the seek or read operation fails.
+     */
+    public byte[] readRawData(ExportEntry entry) throws IOException {
+        if (entry == null) {
+            throw new IllegalArgumentException("ExportEntry cannot be null");
+        }
+
+        // Usamos o 'file' (RandomAccess) que já existe na classe UnrealPackage
+        // Sincronizamos para evitar que o ponteiro pule se você clicar em dois lugares ao mesmo tempo
+        synchronized (file) {
+            byte[] data = new byte[entry.getSize()];
+            
+            // Salva a posição atual para não quebrar a leitura do decompiler
+            int originalPosition = file.getPosition();
+            
+            try {
+                file.setPosition(entry.getOffset());
+                file.readFully(data, 0, entry.getSize());
+            } finally {
+                // Volta o ponteiro para onde estava (segurança total)
+                file.setPosition(originalPosition);
+            }
+            
+            return data;
         }
     }
     
